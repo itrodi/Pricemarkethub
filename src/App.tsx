@@ -11,11 +11,24 @@ import SearchPage from './pages/SearchPage';
 import AboutPage from './pages/AboutPage';
 import { useCompare } from './hooks/useCompare';
 
-export default function App() {
+// Admin
+import { AdminAuthProvider } from './hooks/useAdminAuth';
+import AdminGuard from './components/admin/AdminGuard';
+import AdminLayout from './components/admin/AdminLayout';
+import AdminLogin from './pages/admin/AdminLogin';
+import AdminDashboard from './pages/admin/AdminDashboard';
+import AdminCategories from './pages/admin/AdminCategories';
+import AdminProducts from './pages/admin/AdminProducts';
+import AdminLocations from './pages/admin/AdminLocations';
+import AdminPrices from './pages/admin/AdminPrices';
+import AdminImport from './pages/admin/AdminImport';
+import AdminScraper from './pages/admin/AdminScraper';
+
+function PublicRoutes() {
   const compare = useCompare();
 
   return (
-    <BrowserRouter>
+    <>
       <TickerBar />
       <Header compareCount={compare.count} />
       <main style={{ flex: 1 }}>
@@ -48,6 +61,38 @@ export default function App() {
         </Routes>
       </main>
       <Footer />
+    </>
+  );
+}
+
+export default function App() {
+  return (
+    <BrowserRouter>
+      <AdminAuthProvider>
+        <Routes>
+          {/* Admin Routes */}
+          <Route path="/admin/login" element={<AdminLogin />} />
+          <Route
+            path="/admin/*"
+            element={
+              <AdminGuard>
+                <AdminLayout />
+              </AdminGuard>
+            }
+          >
+            <Route index element={<AdminDashboard />} />
+            <Route path="categories" element={<AdminCategories />} />
+            <Route path="products" element={<AdminProducts />} />
+            <Route path="locations" element={<AdminLocations />} />
+            <Route path="prices" element={<AdminPrices />} />
+            <Route path="import" element={<AdminImport />} />
+            <Route path="scraper" element={<AdminScraper />} />
+          </Route>
+
+          {/* Public Routes */}
+          <Route path="/*" element={<PublicRoutes />} />
+        </Routes>
+      </AdminAuthProvider>
     </BrowserRouter>
   );
 }
