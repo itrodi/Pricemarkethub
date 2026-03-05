@@ -1,7 +1,14 @@
 import { fetchPage, checkRobotsTxt } from './fetcher.js';
 import { parseProductPage, getNextPageUrl } from './parser.js';
-import { loadProductMap, loadLocationMap, insertPricePoints, refreshViews } from './database.js';
-import { matchProducts } from './matcher.js';
+import {
+  loadCategoryMap,
+  loadSubcategoryMap,
+  loadLocationMap,
+  findOrCreateProduct,
+  resolveLocation,
+  insertPricePoints,
+  refreshViews,
+} from './database.js';
 import { logger } from './logger.js';
 import { SOURCES } from '../config/sources.js';
 
@@ -9,15 +16,19 @@ const MAX_PAGES = parseInt(process.env.MAX_PAGES_PER_CATEGORY || '5', 10);
 
 /**
  * Run a scraper for a specific source.
+ * The new flow:
+ *   1. Scrape product listings from the source
+ *   2. For each scraped product, find or create it in the products table
+ *   3. Insert price points for each product
  *
- * @param {string} sourceKey - Key from SOURCES config (jumia, konga, jiji)
+ * @param {string} sourceKey - Key from SOURCES config (e.g., 'jiji')
  * @returns {object} Summary of results
  */
 export async function runScraper(sourceKey) {
   const config = SOURCES[sourceKey];
   if (!config) {
     logger.error(`Unknown source: ${sourceKey}`);
-    return { source: sourceKey, error: 'Unknown source', totalMatched: 0, totalUnmatched: 0 };
+    return { source: sourceKey, error: 'Unknown source', productsCreated: 0, pricePointsInserted: 0 };
   }
 
   logger.info(`=== Starting scraper for ${config.name} ===`, {}, sourceKey);
@@ -26,30 +37,34 @@ export async function runScraper(sourceKey) {
   const allowed = await checkRobotsTxt(config.baseUrl, sourceKey);
   if (!allowed) {
     logger.error(`Scraping not allowed by robots.txt for ${config.name}`, {}, sourceKey);
-    return { source: sourceKey, error: 'Blocked by robots.txt', totalMatched: 0, totalUnmatched: 0 };
+    return { source: sourceKey, error: 'Blocked by robots.txt', productsCreated: 0, pricePointsInserted: 0 };
   }
 
   // Load reference data
-  const productMap = await loadProductMap();
+  const categoryMap = await loadCategoryMap();
+  const subcategoryMap = await loadSubcategoryMap();
   const locationMap = await loadLocationMap();
 
-  // Determine location ID
-  const locationName = config.location.toLowerCase();
-  const location = locationMap.get(locationName) || locationMap.get('lagos');
-  const locationId = location?.id;
-
-  if (!locationId && productMap.size > 0) {
-    logger.warn(`No location found for "${config.location}". Using dry-run mode.`, {}, sourceKey);
-  }
-
-  let totalMatched = 0;
-  let totalUnmatched = 0;
+  let totalProductsCreated = 0;
+  let totalProductsSkipped = 0;
+  let totalScraped = 0;
   const allPricePoints = [];
-  const allUnmatched = [];
 
   // Scrape each category
   for (const category of config.categories) {
     logger.info(`Scraping category: ${category.name}`, {}, sourceKey);
+
+    // Resolve category and subcategory IDs
+    const cat = categoryMap.get(category.categorySlug);
+    const subcat = subcategoryMap.get(category.subcategorySlug);
+
+    if (!cat) {
+      logger.error(`Category "${category.categorySlug}" not found in DB. Run seed.sql first.`, {}, sourceKey);
+      continue;
+    }
+
+    const categoryId = cat.id;
+    const subcategoryId = subcat?.id || null;
 
     for (const urlPath of category.urls) {
       let url = config.baseUrl + urlPath;
@@ -67,31 +82,41 @@ export async function runScraper(sourceKey) {
 
         // Parse products from the page
         const scrapedProducts = parseProductPage(html, config, category.name);
+        totalScraped += scrapedProducts.length;
 
         if (scrapedProducts.length === 0) {
           logger.info(`No products found on page ${page}, stopping pagination.`, {}, sourceKey);
           break;
         }
 
-        // Match against database
-        if (productMap.size > 0 && locationId) {
-          const { matched, unmatched } = matchProducts(
-            scrapedProducts,
-            productMap,
-            locationId,
-            config.source,
-            category.subcategory
-          );
-          allPricePoints.push(...matched);
-          allUnmatched.push(...unmatched);
-          totalMatched += matched.length;
-          totalUnmatched += unmatched.length;
-        } else {
-          // Dry-run: just log what we found
-          logger.info(`Dry-run: found ${scrapedProducts.length} products`, {
-            sample: scrapedProducts.slice(0, 3).map(p => `${p.name}: ₦${p.price.toLocaleString()}`),
-          }, sourceKey);
-          totalUnmatched += scrapedProducts.length;
+        logger.info(`Found ${scrapedProducts.length} products on page ${page}`, {}, sourceKey);
+
+        // Process each scraped product: find-or-create, then create price point
+        for (const scraped of scrapedProducts) {
+          const product = await findOrCreateProduct(scraped, categoryId, subcategoryId, config.source);
+
+          if (!product) {
+            totalProductsSkipped++;
+            continue;
+          }
+
+          totalProductsCreated++;
+
+          // Resolve location from the scraped text (e.g., "Lagos, Ikeja")
+          const locationId = resolveLocation(scraped.location, locationMap);
+
+          if (locationId) {
+            allPricePoints.push({
+              product_id: product.id,
+              location_id: locationId,
+              price: scraped.price,
+              currency: 'NGN',
+              source: config.source,
+              verified: false,
+              location_text: scraped.location || null,
+              recorded_at: new Date().toISOString(),
+            });
+          }
         }
 
         // Check for next page
@@ -100,31 +125,27 @@ export async function runScraper(sourceKey) {
     }
   }
 
-  // Insert matched price points
+  // Insert all price points
+  let pricePointsInserted = 0;
   if (allPricePoints.length > 0) {
     const { success, errors } = await insertPricePoints(allPricePoints);
+    pricePointsInserted = success;
     logger.info(`Inserted ${success} price points (${errors} errors)`, {}, sourceKey);
   }
 
   logger.info(`=== ${config.name} scrape complete ===`, {
-    totalMatched,
-    totalUnmatched,
-    pricePointsInserted: allPricePoints.length,
+    totalScraped,
+    productsProcessed: totalProductsCreated,
+    productsSkipped: totalProductsSkipped,
+    pricePointsInserted,
   }, sourceKey);
-
-  // Log unmatched for review
-  if (allUnmatched.length > 0) {
-    logger.info('Top unmatched products for review:', {
-      products: allUnmatched.slice(0, 20).map(u => `${u.name} (₦${u.price.toLocaleString()})`)
-    }, sourceKey);
-  }
 
   return {
     source: sourceKey,
     name: config.name,
-    totalMatched,
-    totalUnmatched,
-    pricePointsInserted: allPricePoints.length,
+    totalScraped,
+    productsCreated: totalProductsCreated,
+    pricePointsInserted,
   };
 }
 
@@ -145,7 +166,7 @@ export async function runAllScrapers() {
       results.push(result);
     } catch (err) {
       logger.error(`Scraper ${sourceKey} failed with error: ${err.message}`, {}, sourceKey);
-      results.push({ source: sourceKey, error: err.message, totalMatched: 0, totalUnmatched: 0 });
+      results.push({ source: sourceKey, error: err.message, productsCreated: 0, pricePointsInserted: 0 });
     }
   }
 
@@ -160,7 +181,7 @@ export async function runAllScrapers() {
     if (r.error) {
       logger.info(`  ${r.source}: ERROR - ${r.error}`);
     } else {
-      logger.info(`  ${r.source}: ${r.totalMatched} matched, ${r.totalUnmatched} unmatched, ${r.pricePointsInserted || 0} inserted`);
+      logger.info(`  ${r.source}: ${r.totalScraped} scraped, ${r.productsCreated} products, ${r.pricePointsInserted} prices`);
     }
   }
   logger.info('====================================');

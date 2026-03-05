@@ -7,7 +7,7 @@ import { logger } from './logger.js';
  * @param {string} html - Raw HTML content
  * @param {object} config - Source configuration with selectors and priceParser
  * @param {string} categoryName - Name of the category being scraped
- * @returns {Array<{name: string, price: number, link: string}>}
+ * @returns {Array<{name: string, price: number, link: string, condition: string|null, location: string|null, imageUrl: string|null}>}
  */
 export function parseProductPage(html, config, categoryName = '') {
   const $ = cheerio.load(html);
@@ -32,7 +32,7 @@ export function parseProductPage(html, config, categoryName = '') {
       if (!priceText) return;
 
       const price = priceParser(priceText);
-      if (!price || price <= 0 || price > 100_000_000) return; // Sanity check
+      if (!price || price <= 0 || price > 500_000_000) return; // Sanity check (cars can be expensive)
 
       // Extract link
       const linkEl = $el.find(selectors.productLink).first();
@@ -41,7 +41,31 @@ export function parseProductPage(html, config, categoryName = '') {
         link = baseUrl + link;
       }
 
-      products.push({ name, price, link });
+      // Extract condition (Jiji-specific: "Brand New", "Used", "Foreign Used", etc.)
+      let condition = null;
+      if (selectors.productCondition) {
+        const conditionEl = $el.find(selectors.productCondition).first();
+        const conditionText = conditionEl.text().trim();
+        if (conditionText && config.conditionParser) {
+          condition = config.conditionParser(conditionText);
+        }
+      }
+
+      // Extract location (Jiji-specific: "Lagos, Ikeja")
+      let location = null;
+      if (selectors.productLocation) {
+        const locationEl = $el.find(selectors.productLocation).first();
+        location = locationEl.text().trim() || null;
+      }
+
+      // Extract image URL
+      let imageUrl = null;
+      if (selectors.productImage) {
+        const imgEl = $el.find(selectors.productImage).first();
+        imageUrl = imgEl.attr('src') || imgEl.attr('data-src') || null;
+      }
+
+      products.push({ name, price, link, condition, location, imageUrl });
     } catch {
       // Skip malformed entries
     }
@@ -68,15 +92,4 @@ export function getNextPageUrl(html, config) {
   }
 
   return href;
-}
-
-/**
- * Normalize a product name for matching against the database.
- * Strips common suffixes, standardizes spacing, etc.
- */
-export function normalizeProductName(name) {
-  return name
-    .replace(/\s+/g, ' ')
-    .replace(/[""'']/g, '')
-    .trim();
 }

@@ -21,32 +21,50 @@ export function initDatabase() {
 }
 
 /**
- * Load all products from the database for matching.
- * Returns a map of lowercase product name -> product record.
+ * Load category map: slug -> { id, name }
  */
-export async function loadProductMap() {
+export async function loadCategoryMap() {
   if (!supabase) return new Map();
 
   const { data, error } = await supabase
-    .from('products')
-    .select('id, name, slug, category_id, subcategory, unit');
+    .from('categories')
+    .select('id, name, slug');
 
   if (error) {
-    logger.error('Failed to load products', { error: error.message });
+    logger.error('Failed to load categories', { error: error.message });
     return new Map();
   }
 
   const map = new Map();
-  for (const product of data) {
-    map.set(product.name.toLowerCase(), product);
-    // Also add without parenthetical for fuzzy matching
-    const simplified = product.name.replace(/\s*\(.*?\)\s*/g, '').trim().toLowerCase();
-    if (simplified !== product.name.toLowerCase()) {
-      map.set(simplified, product);
-    }
+  for (const cat of data) {
+    map.set(cat.slug, cat);
   }
 
-  logger.info(`Loaded ${data.length} products for matching.`);
+  logger.info(`Loaded ${data.length} categories.`);
+  return map;
+}
+
+/**
+ * Load subcategory map: slug -> { id, name, category_id }
+ */
+export async function loadSubcategoryMap() {
+  if (!supabase) return new Map();
+
+  const { data, error } = await supabase
+    .from('subcategories')
+    .select('id, name, slug, category_id');
+
+  if (error) {
+    logger.error('Failed to load subcategories', { error: error.message });
+    return new Map();
+  }
+
+  const map = new Map();
+  for (const sub of data) {
+    map.set(sub.slug, sub);
+  }
+
+  logger.info(`Loaded ${data.length} subcategories.`);
   return map;
 }
 
@@ -68,19 +86,108 @@ export async function loadLocationMap() {
   const map = new Map();
   for (const loc of data) {
     map.set(loc.name.toLowerCase(), loc);
-  }
-
-  // Add "Online" as a fallback
-  if (!map.has('online')) {
-    // Try to find or use the first location as fallback
-    const onlineLoc = data.find(l => l.location_type === 'online');
-    if (onlineLoc) {
-      map.set('online', onlineLoc);
+    // Also map by state name for Jiji location matching
+    if (loc.state) {
+      map.set(loc.state.toLowerCase(), loc);
     }
   }
 
-  logger.info(`Loaded ${data.length} locations for matching.`);
+  logger.info(`Loaded ${data.length} locations.`);
   return map;
+}
+
+/**
+ * Generate a URL-safe slug from a product name.
+ */
+function slugify(text) {
+  return text
+    .toLowerCase()
+    .replace(/[^a-z0-9\s-]/g, '')
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '')
+    .substring(0, 200);
+}
+
+/**
+ * Find or create a product in the database.
+ * Returns the product record with id.
+ */
+export async function findOrCreateProduct(scraped, categoryId, subcategoryId, source) {
+  if (!supabase) return null;
+
+  const slug = slugify(scraped.name);
+  if (!slug) return null;
+
+  // Try to find existing product by slug
+  const { data: existing } = await supabase
+    .from('products')
+    .select('id, name, slug')
+    .eq('slug', slug)
+    .maybeSingle();
+
+  if (existing) {
+    return existing;
+  }
+
+  // Create new product
+  const { data: created, error } = await supabase
+    .from('products')
+    .insert({
+      name: scraped.name,
+      slug,
+      category_id: categoryId,
+      subcategory_id: subcategoryId || null,
+      condition: scraped.condition || null,
+      image_url: scraped.imageUrl || null,
+      source_url: scraped.link || null,
+      source,
+      unit: 'per unit',
+    })
+    .select('id, name, slug')
+    .single();
+
+  if (error) {
+    // Could be a race condition / duplicate slug - try to fetch again
+    if (error.code === '23505') {
+      const { data: retry } = await supabase
+        .from('products')
+        .select('id, name, slug')
+        .eq('slug', slug)
+        .maybeSingle();
+      return retry;
+    }
+    logger.warn(`Failed to create product "${scraped.name}": ${error.message}`);
+    return null;
+  }
+
+  return created;
+}
+
+/**
+ * Resolve a Jiji location string like "Lagos, Ikeja" to a location_id.
+ * Falls back to "Online" if not found.
+ */
+export function resolveLocation(locationText, locationMap) {
+  if (!locationText) return locationMap.get('online')?.id || null;
+
+  // Jiji format: "State, Area" e.g., "Lagos, Ikeja" or "Oyo, Ibadan"
+  const parts = locationText.split(',').map(p => p.trim());
+
+  // Try the state first (e.g., "Lagos")
+  if (parts[0]) {
+    const stateMatch = locationMap.get(parts[0].toLowerCase());
+    if (stateMatch) return stateMatch.id;
+  }
+
+  // Try the area (e.g., "Ibadan")
+  if (parts[1]) {
+    const areaMatch = locationMap.get(parts[1].toLowerCase());
+    if (areaMatch) return areaMatch.id;
+  }
+
+  // Fallback to Online
+  return locationMap.get('online')?.id || null;
 }
 
 /**

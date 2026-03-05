@@ -5,8 +5,6 @@
  *
  * Usage:
  *   node src/index.js                  # Run all scrapers
- *   node src/index.js --source jumia   # Run specific scraper
- *   node src/index.js --source konga   # Run specific scraper
  *   node src/index.js --source jiji    # Run specific scraper
  *   node src/index.js --dry-run        # Don't save to DB
  */
@@ -63,11 +61,12 @@ async function main() {
   }
 
   // Summary
-  const totalMatched = results.reduce((sum, r) => sum + (r.totalMatched || 0), 0);
+  const totalScraped = results.reduce((sum, r) => sum + (r.totalScraped || 0), 0);
+  const totalProducts = results.reduce((sum, r) => sum + (r.productsCreated || 0), 0);
   const totalInserted = results.reduce((sum, r) => sum + (r.pricePointsInserted || 0), 0);
   const errors = results.filter(r => r.error);
 
-  logger.info(`\nFinal Summary: ${totalMatched} products matched, ${totalInserted} price points saved, ${errors.length} errors.`);
+  logger.info(`\nFinal Summary: ${totalScraped} scraped, ${totalProducts} products, ${totalInserted} price points saved, ${errors.length} errors.`);
 
   if (errors.length > 0) {
     process.exit(1);
