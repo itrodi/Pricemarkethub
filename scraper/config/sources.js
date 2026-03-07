@@ -5,46 +5,61 @@
  */
 
 export const SOURCES = {
+  jiji: {
+    name: 'Jiji Nigeria',
+    baseUrl: 'https://jiji.ng',
+    source: 'jiji',
+    categories: [
+      {
+        name: 'Mobile Phones',
+        categorySlug: 'mobile-devices',
+        subcategorySlug: 'mobile-phones',
+        urls: [
+          '/mobile-phones',
+        ],
+      },
+      // More subcategories will be added as we configure them:
+      // { name: 'Tablets', subcategorySlug: 'tablets', urls: ['/tablets'] },
+      // { name: 'Smart Watches', subcategorySlug: 'smart-watches', urls: ['/smart-watches'] },
+      // { name: 'Phone Accessories', subcategorySlug: 'phone-accessories', urls: ['/cell-phones-tablets-accessories'] },
+      // { name: 'Headphones', subcategorySlug: 'headphones', urls: ['/headphones'] },
+    ],
+    selectors: {
+      // Jiji gallery-view listing selectors (confirmed from live HTML)
+      productCard: '.b-list-advert__gallery__item',
+      productName: '.b-advert-title-inner',
+      productPrice: '.qa-advert-price',
+      productLink: 'a.b-list-advert-base',
+      productCondition: '.b-list-advert-base__item-attr',
+      productLocation: '.b-list-advert__region__text',
+      productImage: '.b-list-advert-base__img img',
+      nextPage: 'a.b-pagination__next, a[rel="next"]',
+    },
+    priceParser(text) {
+      // Jiji format: "₦ 150,000" or "₦150000"
+      const match = text.replace(/[₦,\s]/g, '').match(/(\d+)/);
+      return match ? parseInt(match[1], 10) : null;
+    },
+    conditionParser(text) {
+      // Map Jiji condition labels to our DB enum values
+      const t = text.toLowerCase().trim();
+      if (t === 'brand new') return 'brand_new';
+      if (t === 'used') return 'used';
+      if (t === 'foreign used') return 'foreign_used';
+      if (t === 'local used' || t === 'locally used') return 'local_used';
+      if (t === 'refurbished') return 'refurbished';
+      return null;
+    },
+  },
+
+  // Jumia and Konga will be reconfigured later per category
+  // keeping them commented out so only Jiji runs for now
+  /*
   jumia: {
     name: 'Jumia Nigeria',
     baseUrl: 'https://www.jumia.com.ng',
     source: 'jumia',
-    location: 'Online',
-    categories: [
-      {
-        name: 'Phones',
-        categoryId: 'cat-electronics',
-        subcategory: 'Phones',
-        urls: [
-          '/phones-tablets/smartphones/',
-        ],
-      },
-      {
-        name: 'Laptops',
-        categoryId: 'cat-electronics',
-        subcategory: 'Laptops',
-        urls: [
-          '/computing/laptops/',
-        ],
-      },
-      {
-        name: 'Groceries',
-        categoryId: 'cat-agriculture',
-        subcategory: 'Grains',
-        urls: [
-          '/grocery/food-cupboard/grains-rice-pasta-noodles/',
-          '/grocery/food-cupboard/flours-meals/',
-        ],
-      },
-      {
-        name: 'Cooking Oils',
-        categoryId: 'cat-agriculture',
-        subcategory: 'Cooking Oil',
-        urls: [
-          '/grocery/food-cupboard/cooking-oils/',
-        ],
-      },
-    ],
+    categories: [],
     selectors: {
       productCard: 'article.prd',
       productName: 'h3.name',
@@ -53,7 +68,6 @@ export const SOURCES = {
       nextPage: 'a[aria-label="Next page"]',
     },
     priceParser(text) {
-      // Jumia format: "₦ 75,000" or "₦ 75,000 - ₦ 85,000"
       const match = text.replace(/[₦,\s]/g, '').match(/^(\d+)/);
       return match ? parseInt(match[1], 10) : null;
     },
@@ -63,33 +77,7 @@ export const SOURCES = {
     name: 'Konga',
     baseUrl: 'https://www.konga.com',
     source: 'konga',
-    location: 'Online',
-    categories: [
-      {
-        name: 'Phones',
-        categoryId: 'cat-electronics',
-        subcategory: 'Phones',
-        urls: [
-          '/category/phones-tablets-5294',
-        ],
-      },
-      {
-        name: 'Laptops',
-        categoryId: 'cat-electronics',
-        subcategory: 'Laptops',
-        urls: [
-          '/category/laptops-5296',
-        ],
-      },
-      {
-        name: 'Groceries',
-        categoryId: 'cat-agriculture',
-        subcategory: 'Grains',
-        urls: [
-          '/category/food-702',
-        ],
-      },
-    ],
+    categories: [],
     selectors: {
       productCard: '.product-card, [data-testid="product-card"], .sku',
       productName: '.product-name, .name, h3',
@@ -102,49 +90,5 @@ export const SOURCES = {
       return match ? parseInt(match[1], 10) : null;
     },
   },
-
-  jiji: {
-    name: 'Jiji Nigeria',
-    baseUrl: 'https://jiji.ng',
-    source: 'jiji',
-    location: 'Online',
-    categories: [
-      {
-        name: 'Phones',
-        categoryId: 'cat-electronics',
-        subcategory: 'Phones',
-        urls: [
-          '/mobile-phones',
-        ],
-      },
-      {
-        name: 'Vehicles',
-        categoryId: 'cat-transportation',
-        subcategory: 'Vehicles',
-        urls: [
-          '/cars',
-        ],
-      },
-      {
-        name: 'Real Estate',
-        categoryId: 'cat-real-estate',
-        subcategory: 'Rent',
-        urls: [
-          '/real-estate/flats-and-apartments-for-rent',
-        ],
-      },
-    ],
-    selectors: {
-      productCard: '.b-list-advert__item-wrapper, .b-advert-card, [data-advid]',
-      productName: '.b-advert-title-inner, .advert-title, h3',
-      productPrice: '.qa-advert-price, .advert-price, .price',
-      productLink: 'a',
-      nextPage: 'a.b-pagination__next, a[rel="next"]',
-    },
-    priceParser(text) {
-      // Jiji format: "₦ 150,000" or "₦150000"
-      const match = text.replace(/[₦,\s]/g, '').match(/(\d+)/);
-      return match ? parseInt(match[1], 10) : null;
-    },
-  },
+  */
 };
