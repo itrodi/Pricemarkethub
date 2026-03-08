@@ -8,11 +8,14 @@
     "scrape:jumia": "node src/index.js --source jumia",
     "scrape:konga": "node src/index.js --source konga",
     "scrape:jiji": "node src/index.js --source jiji",
-    "schedule": "node src/scheduler.js"
+    "schedule": "node src/scheduler.js",
+    "server": "node src/server.js"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.98.0",
     "cheerio": "^1.0.0",
-    "dotenv": "^16.5.0"
+    "cors": "^2.8.6",
+    "dotenv": "^16.5.0",
+    "express": "^5.2.1"
   }
 }
