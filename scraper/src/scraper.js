@@ -93,7 +93,7 @@ export async function runScraper(sourceKey) {
 
         // Process each scraped product: find-or-create, then create price point
         for (const scraped of scrapedProducts) {
-          const product = await findOrCreateProduct(scraped, categoryId, subcategoryId, config.source);
+          const product = await findOrCreateProduct(scraped, categoryId, subcategoryId, config.source, subcat?.name || category.name);
 
           if (!product) {
             totalProductsSkipped++;

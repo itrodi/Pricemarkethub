@@ -22,6 +22,7 @@ import AdminProducts from './pages/admin/AdminProducts';
 import AdminLocations from './pages/admin/AdminLocations';
 import AdminPrices from './pages/admin/AdminPrices';
 import AdminImport from './pages/admin/AdminImport';
+import AdminSubcategories from './pages/admin/AdminSubcategories';
 import AdminScraper from './pages/admin/AdminScraper';
 
 function PublicRoutes() {
@@ -82,6 +83,7 @@ export default function App() {
           >
             <Route index element={<AdminDashboard />} />
             <Route path="categories" element={<AdminCategories />} />
+            <Route path="subcategories" element={<AdminSubcategories />} />
             <Route path="products" element={<AdminProducts />} />
             <Route path="locations" element={<AdminLocations />} />
             <Route path="prices" element={<AdminPrices />} />

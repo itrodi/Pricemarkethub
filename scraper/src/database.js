@@ -113,11 +113,25 @@ function slugify(text) {
  * Find or create a product in the database.
  * Returns the product record with id.
  */
-export async function findOrCreateProduct(scraped, categoryId, subcategoryId, source) {
+export async function findOrCreateProduct(scraped, categoryId, subcategoryId, source, subcategoryName = null) {
   if (!supabase) return null;
 
   const slug = slugify(scraped.name);
   if (!slug) return null;
+
+  // Build description from specs if available
+  let description = scraped.description || null;
+  if (scraped.specs) {
+    const specParts = [];
+    if (scraped.specs.storage) specParts.push(`Storage: ${scraped.specs.storage}`);
+    if (scraped.specs.ram) specParts.push(`RAM: ${scraped.specs.ram}`);
+    if (scraped.specs.color) specParts.push(`Color: ${scraped.specs.color}`);
+    if (specParts.length > 0) {
+      description = description
+        ? `${description} | ${specParts.join(', ')}`
+        : specParts.join(', ');
+    }
+  }
 
   // Try to find existing product by slug
   const { data: existing } = await supabase
@@ -130,7 +144,7 @@ export async function findOrCreateProduct(scraped, categoryId, subcategoryId, so
     return existing;
   }
 
-  // Create new product
+  // Create new product — set both subcategory_id (FK) and subcategory (TEXT) for compatibility
   const { data: created, error } = await supabase
     .from('products')
     .insert({
@@ -138,7 +152,9 @@ export async function findOrCreateProduct(scraped, categoryId, subcategoryId, so
       slug,
       category_id: categoryId,
       subcategory_id: subcategoryId || null,
+      subcategory: subcategoryName || null,
       condition: scraped.condition || null,
+      description: description || null,
       image_url: scraped.imageUrl || null,
       source_url: scraped.link || null,
       source,

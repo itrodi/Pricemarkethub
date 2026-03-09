@@ -10,6 +10,17 @@ export interface Category {
   updated_at: string;
 }
 
+export interface Subcategory {
+  id: string;
+  name: string;
+  slug: string;
+  category_id: string;
+  description: string | null;
+  display_order: number;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface Location {
   id: string;
   name: string;

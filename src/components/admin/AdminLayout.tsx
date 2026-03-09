@@ -1,6 +1,6 @@
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import {
-  LayoutDashboard, FolderTree, Package, MapPin,
+  LayoutDashboard, FolderTree, Layers, Package, MapPin,
   DollarSign, Upload, LogOut, ChevronLeft, Bot,
 } from 'lucide-react';
 import { useAdminAuth } from '../../hooks/useAdminAuth';
@@ -8,6 +8,7 @@ import { useAdminAuth } from '../../hooks/useAdminAuth';
 const NAV_ITEMS = [
   { to: '/admin', icon: LayoutDashboard, label: 'Dashboard', end: true },
   { to: '/admin/categories', icon: FolderTree, label: 'Categories', end: false },
+  { to: '/admin/subcategories', icon: Layers, label: 'Subcategories', end: false },
   { to: '/admin/products', icon: Package, label: 'Products', end: false },
   { to: '/admin/locations', icon: MapPin, label: 'Locations', end: false },
   { to: '/admin/prices', icon: DollarSign, label: 'Price Points', end: false },
