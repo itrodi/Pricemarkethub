@@ -2,58 +2,162 @@
  * Scraper source configurations.
  * Each source defines the target site, category URLs, and CSS selectors
  * for extracting product data.
+ *
+ * Updated based on live analysis of Jiji.ng HTML structure (March 2026).
+ * Jiji uses a Nuxt.js SSR app with masonry gallery layout.
  */
+
+/**
+ * Known phone brands on Jiji (used for brand extraction from titles).
+ */
+const PHONE_BRANDS = [
+  'Apple', 'Samsung', 'Xiaomi', 'Google', 'Tecno', 'Infinix', 'Itel',
+  'Huawei', 'Oppo', 'Vivo', 'Realme', 'OnePlus', 'Nokia', 'Motorola',
+  'Sony', 'LG', 'HTC', 'BlackBerry', 'Honor', 'Nothing Phone', 'ZTE',
+  'Gionee', 'Lenovo', 'Asus', 'HMD', 'Villaon', 'Bontel', 'TCL',
+  'Ulefone', 'Umidigi', 'Blackview', 'Doogee', 'Oukitel', 'BLU',
+  'Maxfone', 'Thuraya', 'Iridium', 'Razer', 'Meizu', 'Cat',
+];
+
+/**
+ * Known laptop brands (used for brand extraction from titles).
+ */
+const LAPTOP_BRANDS = [
+  'Apple', 'HP', 'Dell', 'Lenovo', 'Asus', 'Acer', 'Microsoft',
+  'Samsung', 'Toshiba', 'MSI', 'Razer', 'Huawei', 'Google',
+  'LG', 'Sony', 'Fujitsu', 'Panasonic',
+];
+
+/**
+ * Extract brand from a product title using a known brand list.
+ */
+function extractBrand(title, brandList) {
+  const lower = title.toLowerCase();
+  for (const brand of brandList) {
+    if (lower.includes(brand.toLowerCase())) {
+      return brand;
+    }
+  }
+  return null;
+}
+
+/**
+ * Parse price from Jiji's format: "₦ 150,000" or "₦150,000" or "₦ 1,320,000"
+ */
+function jijiPriceParser(text) {
+  const cleaned = text.replace(/[₦,\s]/g, '');
+  const match = cleaned.match(/(\d+)/);
+  return match ? parseInt(match[1], 10) : null;
+}
+
+/**
+ * Map Jiji condition labels to our DB values.
+ */
+function jijiConditionParser(text) {
+  const t = text.toLowerCase().trim();
+  if (t === 'brand new') return 'brand_new';
+  if (t === 'used') return 'used';
+  if (t === 'foreign used') return 'foreign_used';
+  if (t === 'local used' || t === 'locally used') return 'local_used';
+  if (t === 'refurbished') return 'refurbished';
+  return null;
+}
 
 export const SOURCES = {
   jiji: {
     name: 'Jiji Nigeria',
     baseUrl: 'https://jiji.ng',
     source: 'jiji',
+
     categories: [
       {
         name: 'Mobile Phones',
         categorySlug: 'mobile-devices',
         subcategorySlug: 'mobile-phones',
-        urls: [
-          '/mobile-phones',
-        ],
+        urls: ['/mobile-phones'],
+        brandList: PHONE_BRANDS,
       },
-      // More subcategories will be added as we configure them:
-      // { name: 'Tablets', subcategorySlug: 'tablets', urls: ['/tablets'] },
-      // { name: 'Smart Watches', subcategorySlug: 'smart-watches', urls: ['/smart-watches'] },
-      // { name: 'Phone Accessories', subcategorySlug: 'phone-accessories', urls: ['/cell-phones-tablets-accessories'] },
-      // { name: 'Headphones', subcategorySlug: 'headphones', urls: ['/headphones'] },
+      {
+        name: 'Tablets',
+        categorySlug: 'mobile-devices',
+        subcategorySlug: 'tablets',
+        urls: ['/tablets'],
+        brandList: PHONE_BRANDS,
+      },
+      {
+        name: 'Smart Watches',
+        categorySlug: 'mobile-devices',
+        subcategorySlug: 'smart-watches',
+        urls: ['/smart-watches'],
+        brandList: [...PHONE_BRANDS, 'Garmin', 'Fitbit', 'Amazfit'],
+      },
+      {
+        name: 'Phone Accessories',
+        categorySlug: 'mobile-devices',
+        subcategorySlug: 'phone-accessories',
+        urls: ['/cell-phones-tablets-accessories'],
+        brandList: PHONE_BRANDS,
+      },
+      {
+        name: 'Laptops & Computers',
+        categorySlug: 'computing-electronics',
+        subcategorySlug: 'laptops-computers',
+        urls: ['/computers-and-laptops'],
+        brandList: LAPTOP_BRANDS,
+      },
     ],
+
+    /**
+     * Selectors for Jiji's gallery-view listing.
+     *
+     * DOM structure (confirmed from live HTML March 2026):
+     *   .masonry-wall > .masonry-column > [data-column] > .masonry-item >
+     *     .b-list-advert__gallery__item.js-advert-list-item >
+     *       a.b-list-advert-base.qa-advert-list-item
+     *         > .b-list-advert-base__img__wrapper (images, labels, pkg badge)
+     *         > .b-list-advert-base__data (price, title, condition, location)
+     */
     selectors: {
-      // Jiji gallery-view listing selectors (confirmed from live HTML)
-      productCard: '.b-list-advert__gallery__item',
-      productName: '.b-advert-title-inner',
+      // The wrapper div for each listing card. Some may be empty (ad slots).
+      productCard: '.b-list-advert__gallery__item.js-advert-list-item',
+      // The <a> tag inside the card that has href and contains all data
+      productLink: 'a.qa-advert-list-item',
+      // Title text
+      productName: '.b-advert-title-inner.qa-advert-title',
+      // Price (formatted as "₦ 350,000")
       productPrice: '.qa-advert-price',
-      productLink: 'a.b-list-advert-base',
+      // Original price before discount (if present)
+      productOriginalPrice: '.b-advert-discounted-price__price',
+      // Discount percentage text (e.g., "-1%")
+      productDiscount: '.b-advert-discounted-price__percents',
+      // Condition badge (e.g., "Brand New", "Used")
       productCondition: '.b-list-advert-base__item-attr',
+      // Location text (e.g., "Lagos, Ikeja")
       productLocation: '.b-list-advert__region__text',
-      productImage: '.b-list-advert-base__img img',
-      nextPage: 'a.b-pagination__next, a[rel="next"]',
+      // Product image (inside <picture> element)
+      productImage: '.b-list-advert-base__img picture img',
+      // Description snippet
+      productDescription: '.b-list-advert-base__description-text',
+      // Seller verification badge
+      sellerVerified: '.b-list-advert-base__label--blue',
+      // Seller tier badge (DIAMOND, VIP, ENTERPRISE, PREMIUM)
+      sellerTier: '.b-list-advert-base__pkg-label',
+      // Seller tenure label (e.g., "5+ years on Jiji")
+      sellerTenure: '.b-list-advert-base__label',
     },
-    priceParser(text) {
-      // Jiji format: "₦ 150,000" or "₦150000"
-      const match = text.replace(/[₦,\s]/g, '').match(/(\d+)/);
-      return match ? parseInt(match[1], 10) : null;
-    },
-    conditionParser(text) {
-      // Map Jiji condition labels to our DB enum values
-      const t = text.toLowerCase().trim();
-      if (t === 'brand new') return 'brand_new';
-      if (t === 'used') return 'used';
-      if (t === 'foreign used') return 'foreign_used';
-      if (t === 'local used' || t === 'locally used') return 'local_used';
-      if (t === 'refurbished') return 'refurbished';
-      return null;
-    },
+
+    /**
+     * Pagination: Jiji uses ?page=N URL params, 24 items per page.
+     * We generate the next URL ourselves rather than looking for a next-page link.
+     */
+    itemsPerPage: 24,
+
+    priceParser: jijiPriceParser,
+    conditionParser: jijiConditionParser,
+    extractBrand,
   },
 
   // Jumia and Konga will be reconfigured later per category
-  // keeping them commented out so only Jiji runs for now
   /*
   jumia: {
     name: 'Jumia Nigeria',
@@ -65,12 +169,9 @@ export const SOURCES = {
       productName: 'h3.name',
       productPrice: '.prc',
       productLink: 'a.core',
-      nextPage: 'a[aria-label="Next page"]',
     },
-    priceParser(text) {
-      const match = text.replace(/[₦,\s]/g, '').match(/^(\d+)/);
-      return match ? parseInt(match[1], 10) : null;
-    },
+    itemsPerPage: 40,
+    priceParser: jijiPriceParser,
   },
 
   konga: {
@@ -83,12 +184,9 @@ export const SOURCES = {
       productName: '.product-name, .name, h3',
       productPrice: '.product-price, .price, .amount',
       productLink: 'a',
-      nextPage: '.pagination a:last-child, a[rel="next"]',
     },
-    priceParser(text) {
-      const match = text.replace(/[₦,\s]/g, '').match(/(\d+)/);
-      return match ? parseInt(match[1], 10) : null;
-    },
+    itemsPerPage: 40,
+    priceParser: jijiPriceParser,
   },
   */
 };

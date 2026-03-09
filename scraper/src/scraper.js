@@ -1,5 +1,5 @@
 import { fetchPage, checkRobotsTxt } from './fetcher.js';
-import { parseProductPage, getNextPageUrl } from './parser.js';
+import { parseProductPage, buildNextPageUrl } from './parser.js';
 import {
   loadCategoryMap,
   loadSubcategoryMap,
@@ -16,7 +16,7 @@ const MAX_PAGES = parseInt(process.env.MAX_PAGES_PER_CATEGORY || '5', 10);
 
 /**
  * Run a scraper for a specific source.
- * The new flow:
+ * The flow:
  *   1. Scrape product listings from the source
  *   2. For each scraped product, find or create it in the products table
  *   3. Insert price points for each product
@@ -80,8 +80,8 @@ export async function runScraper(sourceKey) {
           break;
         }
 
-        // Parse products from the page
-        const scrapedProducts = parseProductPage(html, config, category.name);
+        // Parse products from the page, passing the full category for brand extraction
+        const scrapedProducts = parseProductPage(html, config, category);
         totalScraped += scrapedProducts.length;
 
         if (scrapedProducts.length === 0) {
@@ -119,8 +119,12 @@ export async function runScraper(sourceKey) {
           }
         }
 
-        // Check for next page
-        url = getNextPageUrl(html, config);
+        // URL-based pagination: build next page URL using ?page=N
+        if (page < MAX_PAGES) {
+          url = buildNextPageUrl(url, page);
+        } else {
+          url = null;
+        }
       }
     }
   }

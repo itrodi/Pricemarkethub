@@ -1,7 +1,7 @@
 import { logger } from './logger.js';
 
 const DEFAULT_DELAY = parseInt(process.env.SCRAPE_DELAY_MS || '2000', 10);
-const USER_AGENT = process.env.USER_AGENT || 'PriceWise-Bot/1.0 (+https://pricewise.ng)';
+const USER_AGENT = process.env.USER_AGENT || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36';
 const MAX_RETRIES = 3;
 const RETRY_DELAY = 5000;
 
@@ -24,11 +24,16 @@ export async function fetchPage(url, source = '') {
       const response = await fetch(url, {
         headers: {
           'User-Agent': USER_AGENT,
-          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-          'Accept-Language': 'en-US,en;q=0.5',
-          'Accept-Encoding': 'gzip, deflate',
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+          'Accept-Language': 'en-NG,en-US;q=0.9,en;q=0.8',
+          'Accept-Encoding': 'gzip, deflate, br',
           'Connection': 'keep-alive',
           'Cache-Control': 'no-cache',
+          'Sec-Fetch-Dest': 'document',
+          'Sec-Fetch-Mode': 'navigate',
+          'Sec-Fetch-Site': 'none',
+          'Sec-Fetch-User': '?1',
+          'Upgrade-Insecure-Requests': '1',
         },
         signal: AbortSignal.timeout(30000), // 30s timeout
       });
