@@ -42,6 +42,93 @@ function extractBrand(title, brandList) {
 }
 
 /**
+ * Extract product specs from title text.
+ * Jiji titles often include storage, RAM, color, and model info.
+ * E.g., "Apple iPhone 15 Pro Max 256GB 8GB RAM Blue" or "Samsung Galaxy S24 Ultra 512GB/12GB Titanium Black"
+ */
+function extractSpecs(title) {
+  const specs = {};
+
+  // Storage: 32GB, 64GB, 128GB, 256GB, 512GB, 1TB, 2TB
+  const storageMatch = title.match(/\b(\d+)\s*(GB|TB)\b/i);
+  if (storageMatch) {
+    const value = parseInt(storageMatch[1], 10);
+    const unit = storageMatch[2].toUpperCase();
+    // If value <= 16 and unit is GB, likely RAM not storage (unless it's the only spec)
+    if (unit === 'TB' || value >= 32) {
+      specs.storage = `${value}${unit}`;
+    }
+  }
+
+  // RAM: "8GB RAM", "12GB RAM", "6/128", "8/256", "512GB/12GB"
+  const ramPatterns = [
+    /\b(\d+)\s*GB\s*RAM\b/i,                    // "8GB RAM"
+    /\bRAM\s*(\d+)\s*GB\b/i,                     // "RAM 8GB"
+    /\b(\d+)\s*\/\s*(\d+)\s*GB?\b/,              // "8/256" or "12/512GB" (RAM/Storage)
+    /\b(\d+)\s*GB\s*\/\s*(\d+)\s*GB\b/i,         // "512GB/12GB" (Storage/RAM)
+  ];
+
+  for (const pattern of ramPatterns) {
+    const match = title.match(pattern);
+    if (match) {
+      if (pattern === ramPatterns[2]) {
+        // "8/256" format — first number is RAM, second is storage
+        const ram = parseInt(match[1], 10);
+        const storage = parseInt(match[2], 10);
+        if (ram <= 24) specs.ram = `${ram}GB`;
+        if (storage >= 32) specs.storage = `${storage}GB`;
+      } else if (pattern === ramPatterns[3]) {
+        // "512GB/12GB" — larger is storage, smaller is RAM
+        const first = parseInt(match[1], 10);
+        const second = parseInt(match[2], 10);
+        if (first > second) {
+          specs.storage = `${first}GB`;
+          specs.ram = `${second}GB`;
+        } else {
+          specs.ram = `${first}GB`;
+          specs.storage = `${second}GB`;
+        }
+      } else {
+        specs.ram = `${match[1]}GB`;
+      }
+      break;
+    }
+  }
+
+  // If we found storage but not RAM from the main pattern, check for a second GB value
+  if (specs.storage && !specs.ram) {
+    const allGb = [...title.matchAll(/\b(\d+)\s*GB\b/gi)];
+    if (allGb.length >= 2) {
+      const values = allGb.map(m => parseInt(m[1], 10));
+      const smaller = Math.min(...values);
+      if (smaller <= 24 && smaller !== parseInt(specs.storage)) {
+        specs.ram = `${smaller}GB`;
+      }
+    }
+  }
+
+  // Color: common phone/device colors
+  const COLORS = [
+    'Black', 'White', 'Blue', 'Red', 'Green', 'Gold', 'Silver', 'Grey', 'Gray',
+    'Purple', 'Pink', 'Yellow', 'Orange', 'Coral', 'Midnight', 'Starlight',
+    'Space Gray', 'Space Grey', 'Titanium Black', 'Titanium Blue', 'Titanium Gray',
+    'Titanium Natural', 'Titanium White', 'Desert Titanium', 'Natural Titanium',
+    'Sierra Blue', 'Alpine Green', 'Deep Purple', 'Phantom Black', 'Cream',
+    'Graphite', 'Pacific Blue', 'Midnight Green', 'Rose Gold', 'Lavender',
+    'Burgundy', 'Mint', 'Violet', 'Bronze', 'Mystic Bronze',
+  ];
+  const lower = title.toLowerCase();
+  for (const color of COLORS) {
+    if (lower.includes(color.toLowerCase())) {
+      specs.color = color;
+      break;
+    }
+  }
+
+  return Object.keys(specs).length > 0 ? specs : null;
+}
+
+/**
  * Parse price from Jiji's format: "₦ 150,000" or "₦150,000" or "₦ 1,320,000"
  */
 function jijiPriceParser(text) {
@@ -155,6 +242,7 @@ export const SOURCES = {
     priceParser: jijiPriceParser,
     conditionParser: jijiConditionParser,
     extractBrand,
+    extractSpecs,
   },
 
   // Jumia and Konga will be reconfigured later per category

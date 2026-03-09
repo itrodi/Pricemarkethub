@@ -1,6 +1,6 @@
 import { supabase, isSupabaseConfigured } from './supabase';
 import { sanitizeInput } from './sanitize';
-import type { Category, Product, Location, PricePoint } from '../types/database';
+import type { Category, Subcategory, Product, Location, PricePoint } from '../types/database';
 import {
   categories as mockCategories,
   locations as mockLocations,
@@ -22,6 +22,7 @@ function slugify(text: string): string { return text.toLowerCase().replace(/[^a-
 // ============================================
 export interface AdminStats {
   totalCategories: number;
+  totalSubcategories: number;
   totalProducts: number;
   totalLocations: number;
   totalPricePoints: number;
@@ -34,6 +35,7 @@ export async function fetchAdminStats(): Promise<AdminStats> {
     const oneDayAgo = new Date(Date.now() - 86400000);
     return {
       totalCategories: demoCategories.length,
+      totalSubcategories: 0,
       totalProducts: demoProducts.length,
       totalLocations: demoLocations.length,
       totalPricePoints: demoPricePoints.length,
@@ -42,8 +44,9 @@ export async function fetchAdminStats(): Promise<AdminStats> {
     };
   }
 
-  const [cats, prods, locs, pps, alerts] = await Promise.all([
+  const [cats, subcats, prods, locs, pps, alerts] = await Promise.all([
     supabase!.from('categories').select('id', { count: 'exact', head: true }),
+    supabase!.from('subcategories').select('id', { count: 'exact', head: true }),
     supabase!.from('products').select('id', { count: 'exact', head: true }),
     supabase!.from('locations').select('id', { count: 'exact', head: true }),
     supabase!.from('price_points').select('id', { count: 'exact', head: true }),
@@ -53,7 +56,7 @@ export async function fetchAdminStats(): Promise<AdminStats> {
     .gte('recorded_at', new Date(Date.now() - 86400000).toISOString());
 
   return {
-    totalCategories: cats.count || 0, totalProducts: prods.count || 0, totalLocations: locs.count || 0,
+    totalCategories: cats.count || 0, totalSubcategories: subcats.count || 0, totalProducts: prods.count || 0, totalLocations: locs.count || 0,
     totalPricePoints: pps.count || 0, totalAlerts: alerts.count || 0, recentPricePoints: recentRes.count || 0,
   };
 }
@@ -119,6 +122,59 @@ export async function adminUpdateCategory(
 export async function adminDeleteCategory(id: string): Promise<void> {
   if (!isSupabaseConfigured) { demoCategories = demoCategories.filter(c => c.id !== id); return; }
   const { error } = await supabase!.from('categories').delete().eq('id', id);
+  if (error) throw new Error(error.message);
+}
+
+// ============================================
+// Subcategories CRUD
+// ============================================
+export async function adminFetchSubcategories(): Promise<(Subcategory & { category_name?: string })[]> {
+  if (!isSupabaseConfigured) return [];
+  const { data, error } = await supabase!
+    .from('subcategories')
+    .select('*, categories(name)')
+    .order('display_order');
+  if (error) throw new Error(error.message);
+  return (data || []).map((s: Record<string, unknown>) => ({
+    ...s,
+    category_name: (s.categories as { name: string } | null)?.name || '',
+  })) as (Subcategory & { category_name?: string })[];
+}
+
+export async function adminCreateSubcategory(
+  input: { name: string; category_id: string; description: string; display_order: number }
+): Promise<Subcategory> {
+  const name = sanitizeInput(input.name).trim();
+  if (!name) throw new Error('Subcategory name is required');
+  if (!input.category_id) throw new Error('Parent category is required');
+  const slug = slugify(name);
+
+  if (!isSupabaseConfigured) throw new Error('Supabase not configured');
+
+  const { data, error } = await supabase!.from('subcategories').insert({
+    name, slug, category_id: input.category_id,
+    description: input.description || null,
+    display_order: input.display_order || 0,
+  }).select().single();
+  if (error) throw new Error(error.message);
+  return data;
+}
+
+export async function adminUpdateSubcategory(
+  id: string, input: Partial<{ name: string; category_id: string; description: string; display_order: number }>
+): Promise<Subcategory> {
+  if (!isSupabaseConfigured) throw new Error('Supabase not configured');
+
+  const updates: Record<string, unknown> = { ...input, updated_at: new Date().toISOString() };
+  if (input.name) { updates.name = sanitizeInput(input.name).trim(); updates.slug = slugify(updates.name as string); }
+  const { data, error } = await supabase!.from('subcategories').update(updates).eq('id', id).select().single();
+  if (error) throw new Error(error.message);
+  return data;
+}
+
+export async function adminDeleteSubcategory(id: string): Promise<void> {
+  if (!isSupabaseConfigured) return;
+  const { error } = await supabase!.from('subcategories').delete().eq('id', id);
   if (error) throw new Error(error.message);
 }
 

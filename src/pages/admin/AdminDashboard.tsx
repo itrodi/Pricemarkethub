@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { FolderTree, Package, MapPin, DollarSign, Bell, TrendingUp } from 'lucide-react';
+import { FolderTree, Layers, Package, MapPin, DollarSign, Bell, TrendingUp } from 'lucide-react';
 import { fetchAdminStats, type AdminStats } from '../../lib/adminApi';
 import { formatNumber } from '../../lib/format';
 import LoadingSpinner from '../../components/ui/LoadingSpinner';
@@ -17,6 +17,7 @@ export default function AdminDashboard() {
 
   const statCards = [
     { label: 'Categories', value: stats?.totalCategories || 0, icon: FolderTree, color: 'var(--green)', link: '/admin/categories' },
+    { label: 'Subcategories', value: stats?.totalSubcategories || 0, icon: Layers, color: 'var(--teal, #14b8a6)', link: '/admin/subcategories' },
     { label: 'Products', value: stats?.totalProducts || 0, icon: Package, color: 'var(--blue)', link: '/admin/products' },
     { label: 'Locations', value: stats?.totalLocations || 0, icon: MapPin, color: 'var(--purple)', link: '/admin/locations' },
     { label: 'Price Points', value: stats?.totalPricePoints || 0, icon: DollarSign, color: 'var(--yellow)', link: '/admin/prices' },
@@ -31,7 +32,7 @@ export default function AdminDashboard() {
         <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>Overview of your PriceWise data</p>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16, marginBottom: 32 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 16, marginBottom: 32 }}>
         {statCards.map(card => (
           <Link key={card.label} to={card.link} style={{ background: 'var(--bg-card)', border: '1px solid var(--border-primary)', borderRadius: 12, padding: 20, textDecoration: 'none', color: 'inherit' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>

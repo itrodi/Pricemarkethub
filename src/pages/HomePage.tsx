@@ -44,6 +44,16 @@ export default function HomePage() {
   // Recent price changes for table
   const tableChanges = priceChanges.slice(0, 12);
 
+  // Recently added products (sorted by last_updated, with price data)
+  const recentProducts = [...summaries]
+    .filter(s => s.avg_price > 0)
+    .sort((a, b) => {
+      const dateA = a.last_updated ? new Date(a.last_updated).getTime() : 0;
+      const dateB = b.last_updated ? new Date(b.last_updated).getTime() : 0;
+      return dateB - dateA;
+    })
+    .slice(0, 12);
+
   return (
     <div>
       {/* Hero + Search */}
@@ -80,6 +90,38 @@ export default function HomePage() {
           ))}
         </div>
       </section>
+
+      {/* Recently Added Products */}
+      {recentProducts.length > 0 && (
+        <section className="section container">
+          <div className="section-header">
+            <h2 className="section-title">Recently Added</h2>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 16 }}>
+            {recentProducts.map(product => {
+              const category = categories.find(c => c.id === product.category_id);
+              return (
+                <Link
+                  key={product.product_id}
+                  to={`/product/${product.slug}`}
+                  className="trending-card"
+                  style={{ textDecoration: 'none', color: 'inherit' }}
+                >
+                  <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: 4 }}>
+                    {category?.name}{product.subcategory ? ` / ${product.subcategory}` : ''}
+                  </div>
+                  <div className="trending-card-name" style={{ marginBottom: 8 }}>{product.name}</div>
+                  <div className="trending-card-price">{formatNaira(product.avg_price)}</div>
+                  <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: 4 }}>
+                    {formatNaira(product.min_price)} - {formatNaira(product.max_price)}
+                    {product.data_points > 0 && <span> &middot; {product.data_points} sources</span>}
+                  </div>
+                </Link>
+              );
+            })}
+          </div>
+        </section>
+      )}
 
       {/* Trending / Most Volatile */}
       <section className="section container">

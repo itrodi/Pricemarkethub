@@ -95,6 +95,12 @@ export function parseProductPage(html, config, category = {}) {
         }
       }
 
+      // Extract specs (storage, RAM, color) from title
+      let specs = null;
+      if (config.extractSpecs) {
+        specs = config.extractSpecs(name);
+      }
+
       // Extract seller info
       let sellerVerified = false;
       if (selectors.sellerVerified) {
@@ -117,6 +123,7 @@ export function parseProductPage(html, config, category = {}) {
         imageUrl,
         brand,
         description,
+        specs,
         sellerVerified,
         sellerTier,
       });
