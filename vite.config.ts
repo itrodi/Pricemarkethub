@@ -9,7 +9,6 @@ export default defineConfig({
         manualChunks: {
           vendor: ['react', 'react-dom', 'react-router-dom'],
           charts: ['recharts'],
-          supabase: ['@supabase/supabase-js'],
         },
       },
     },
@@ -23,6 +22,10 @@ export default defineConfig({
     proxy: {
       '/api/scraper': {
         target: 'http://localhost:3001',
+        changeOrigin: true,
+      },
+      '/api': {
+        target: 'http://localhost:3000',
         changeOrigin: true,
       },
     },
