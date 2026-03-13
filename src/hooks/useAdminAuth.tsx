@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from 'react';
-import { supabase, isSupabaseConfigured } from '../lib/supabase';
+import { API_BASE } from '../lib/supabase';
 
 interface AdminUser {
   id: string;
@@ -22,74 +22,62 @@ const AdminAuthContext = createContext<AdminAuthContextType>({
   isAuthenticated: false,
 });
 
-const DEMO_ADMIN_EMAIL = 'admin@pricewise.ng';
-const DEMO_ADMIN_PASSWORD = 'pricewise2025';
-
 export function AdminAuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AdminUser | null>(null);
   const [loading, setLoading] = useState(true);
 
+  // On mount, check if we have a stored token and validate it
   useEffect(() => {
-    if (isSupabaseConfigured && supabase) {
-      supabase.auth.getSession().then(({ data: { session } }) => {
-        if (session?.user) {
-          setUser({ id: session.user.id, email: session.user.email || '' });
-        }
+    const token = localStorage.getItem('pw_admin_token');
+    if (!token) {
+      setLoading(false);
+      return;
+    }
+
+    // Validate token with the server
+    fetch(`${API_BASE}/admin/auth/me`, {
+      headers: { 'Authorization': `Bearer ${token}` },
+    })
+      .then(res => {
+        if (!res.ok) throw new Error('Invalid token');
+        return res.json();
+      })
+      .then(data => {
+        setUser(data.user);
+      })
+      .catch(() => {
+        localStorage.removeItem('pw_admin_token');
+      })
+      .finally(() => {
         setLoading(false);
       });
-
-      const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-        if (session?.user) {
-          setUser({ id: session.user.id, email: session.user.email || '' });
-        } else {
-          setUser(null);
-        }
-      });
-
-      return () => subscription.unsubscribe();
-    } else {
-      const stored = localStorage.getItem('pw_admin_session');
-      if (stored) {
-        try {
-          const parsed = JSON.parse(stored);
-          if (parsed.email && parsed.expiry > Date.now()) {
-            setUser({ id: 'demo-admin', email: parsed.email });
-          } else {
-            localStorage.removeItem('pw_admin_session');
-          }
-        } catch {
-          localStorage.removeItem('pw_admin_session');
-        }
-      }
-      setLoading(false);
-    }
   }, []);
 
   const signIn = useCallback(async (email: string, password: string): Promise<{ error?: string }> => {
-    if (isSupabaseConfigured && supabase) {
-      const { data, error } = await supabase.auth.signInWithPassword({ email, password });
-      if (error) return { error: error.message };
-      if (data.user) {
-        setUser({ id: data.user.id, email: data.user.email || '' });
+    try {
+      const res = await fetch(`${API_BASE}/admin/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        return { error: data.error || 'Login failed' };
       }
-      return {};
-    }
 
-    if (email === DEMO_ADMIN_EMAIL && password === DEMO_ADMIN_PASSWORD) {
-      const session = { email, expiry: Date.now() + 8 * 60 * 60 * 1000 };
-      localStorage.setItem('pw_admin_session', JSON.stringify(session));
-      setUser({ id: 'demo-admin', email });
+      // Store the JWT token
+      localStorage.setItem('pw_admin_token', data.token);
+      setUser(data.user);
       return {};
+    } catch {
+      return { error: 'Network error. Please try again.' };
     }
-
-    return { error: 'Invalid email or password.' };
   }, []);
 
   const signOut = useCallback(async () => {
-    if (isSupabaseConfigured && supabase) {
-      await supabase.auth.signOut();
-    }
-    localStorage.removeItem('pw_admin_session');
+    localStorage.removeItem('pw_admin_token');
     setUser(null);
   }, []);
 

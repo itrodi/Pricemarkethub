@@ -101,6 +101,9 @@ export interface ProductPriceSummary {
   subcategory: string | null;
   is_featured: boolean;
   view_count: number;
+  image_url: string | null;
+  description: string | null;
+  condition: string | null;
   avg_price: number;
   min_price: number;
   max_price: number;

@@ -1,4 +1,4 @@
-import { supabase, isSupabaseConfigured } from './supabase';
+import { API_BASE } from './supabase';
 import { sanitizeSearchQuery } from './sanitize';
 import type {
   Category,
@@ -23,117 +23,62 @@ import {
   type TickerItem,
 } from '../data/mockData';
 
+/**
+ * Helper to fetch from API with error handling and mock fallback.
+ */
+async function apiFetch<T>(path: string, fallback: T): Promise<T> {
+  try {
+    const res = await fetch(`${API_BASE}${path}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return await res.json();
+  } catch (err) {
+    console.error(`API fetch error (${path}):`, err);
+    return fallback;
+  }
+}
+
 // ============================================
 // Categories
 // ============================================
 export async function fetchCategories(): Promise<Category[]> {
-  if (!isSupabaseConfigured) return mockCategories;
-
-  const { data, error } = await supabase!
-    .from('categories')
-    .select('*')
-    .order('display_order');
-
-  if (error) {
-    console.error('Error fetching categories:', error);
-    return mockCategories;
-  }
-  return data;
+  return apiFetch('/categories', mockCategories);
 }
 
 export async function fetchCategoryBySlug(slug: string): Promise<Category | null> {
-  if (!isSupabaseConfigured) {
-    return mockCategories.find(c => c.slug === slug) || null;
-  }
-
-  const { data, error } = await supabase!
-    .from('categories')
-    .select('*')
-    .eq('slug', slug)
-    .single();
-
-  if (error) return null;
-  return data;
+  return apiFetch(`/categories/${encodeURIComponent(slug)}`, mockCategories.find(c => c.slug === slug) || null);
 }
 
 // ============================================
 // Locations
 // ============================================
 export async function fetchLocations(majorOnly = false): Promise<Location[]> {
-  if (!isSupabaseConfigured) {
-    return majorOnly ? mockLocations.filter(l => l.is_major) : mockLocations;
-  }
-
-  let query = supabase!.from('locations').select('*');
-  if (majorOnly) query = query.eq('is_major', true);
-
-  const { data, error } = await query.order('name');
-  if (error) {
-    console.error('Error fetching locations:', error);
-    return majorOnly ? mockLocations.filter(l => l.is_major) : mockLocations;
-  }
-  return data;
+  const params = majorOnly ? '?major_only=true' : '';
+  const fallback = majorOnly ? mockLocations.filter(l => l.is_major) : mockLocations;
+  return apiFetch(`/locations${params}`, fallback);
 }
 
 // ============================================
 // Products
 // ============================================
 export async function fetchProducts(categoryId?: string): Promise<Product[]> {
-  if (!isSupabaseConfigured) {
-    return categoryId
-      ? mockProducts.filter(p => p.category_id === categoryId)
-      : mockProducts;
-  }
-
-  let query = supabase!.from('products').select('*');
-  if (categoryId) query = query.eq('category_id', categoryId);
-
-  const { data, error } = await query.order('name');
-  if (error) {
-    console.error('Error fetching products:', error);
-    return categoryId
-      ? mockProducts.filter(p => p.category_id === categoryId)
-      : mockProducts;
-  }
-  return data;
+  const params = categoryId ? `?category_id=${encodeURIComponent(categoryId)}` : '';
+  const fallback = categoryId ? mockProducts.filter(p => p.category_id === categoryId) : mockProducts;
+  return apiFetch(`/products${params}`, fallback);
 }
 
 export async function fetchProductBySlug(slug: string): Promise<Product | null> {
-  if (!isSupabaseConfigured) {
-    return mockProducts.find(p => p.slug === slug) || null;
-  }
-
-  const { data, error } = await supabase!
-    .from('products')
-    .select('*')
-    .eq('slug', slug)
-    .single();
-
-  if (error) return null;
-  return data;
+  return apiFetch(`/products/by-slug/${encodeURIComponent(slug)}`, mockProducts.find(p => p.slug === slug) || null);
 }
 
 // ============================================
 // Product Price Summaries
 // ============================================
 export async function fetchProductSummaries(categoryId?: string): Promise<ProductPriceSummary[]> {
-  if (!isSupabaseConfigured) {
-    const summaries = getProductSummaries();
-    return categoryId
-      ? summaries.filter(s => s.category_id === categoryId)
-      : summaries;
-  }
-
-  let query = supabase!.from('product_price_summaries').select('*');
-  if (categoryId) query = query.eq('category_id', categoryId);
-
-  const { data, error } = await query.order('name');
-  if (error) {
-    console.error('Error fetching summaries:', error);
-    const summaries = getProductSummaries();
-    return categoryId ? summaries.filter(s => s.category_id === categoryId) : summaries;
-  }
-  return data;
+  const params = categoryId ? `?category_id=${encodeURIComponent(categoryId)}` : '';
+  const fallback = categoryId
+    ? getProductSummaries().filter(s => s.category_id === categoryId)
+    : getProductSummaries();
+  return apiFetch(`/product-summaries${params}`, fallback);
 }
 
 // ============================================
@@ -143,46 +88,23 @@ export async function fetchLatestPrices(
   productId?: string,
   locationId?: string
 ): Promise<LatestPrice[]> {
-  if (!isSupabaseConfigured) {
-    let prices = getLatestPrices();
-    if (productId) prices = prices.filter(p => p.product_id === productId);
-    if (locationId) prices = prices.filter(p => p.location_id === locationId);
-    return prices;
-  }
+  const params = new URLSearchParams();
+  if (productId) params.set('product_id', productId);
+  if (locationId) params.set('location_id', locationId);
+  const qs = params.toString() ? `?${params.toString()}` : '';
 
-  let query = supabase!.from('latest_prices').select('*');
-  if (productId) query = query.eq('product_id', productId);
-  if (locationId) query = query.eq('location_id', locationId);
+  let fallback = getLatestPrices();
+  if (productId) fallback = fallback.filter(p => p.product_id === productId);
+  if (locationId) fallback = fallback.filter(p => p.location_id === locationId);
 
-  const { data, error } = await query.order('recorded_at', { ascending: false });
-  if (error) {
-    console.error('Error fetching latest prices:', error);
-    let prices = getLatestPrices();
-    if (productId) prices = prices.filter(p => p.product_id === productId);
-    if (locationId) prices = prices.filter(p => p.location_id === locationId);
-    return prices;
-  }
-  return data;
+  return apiFetch(`/latest-prices${qs}`, fallback);
 }
 
 // ============================================
 // Price Changes
 // ============================================
 export async function fetchPriceChanges(days: number = 7, limit: number = 20): Promise<PriceChange[]> {
-  if (!isSupabaseConfigured) {
-    return mockGetPriceChanges(days).slice(0, limit);
-  }
-
-  const { data, error } = await supabase!.rpc('get_price_changes', {
-    p_days: days,
-    p_limit: limit,
-  });
-
-  if (error) {
-    console.error('Error fetching price changes:', error);
-    return mockGetPriceChanges(days).slice(0, limit);
-  }
-  return data;
+  return apiFetch(`/price-changes?days=${days}&limit=${limit}`, mockGetPriceChanges(days).slice(0, limit));
 }
 
 // ============================================
@@ -193,21 +115,13 @@ export async function fetchPriceHistory(
   locationId?: string,
   days: number = 30
 ): Promise<PriceHistoryPoint[]> {
-  if (!isSupabaseConfigured) {
-    return mockGetPriceHistory(productId, locationId, days);
-  }
+  const params = new URLSearchParams({ days: String(days) });
+  if (locationId) params.set('location_id', locationId);
 
-  const { data, error } = await supabase!.rpc('get_price_history', {
-    p_product_id: productId,
-    p_location_id: locationId || null,
-    p_days: days,
-  });
-
-  if (error) {
-    console.error('Error fetching price history:', error);
-    return mockGetPriceHistory(productId, locationId, days);
-  }
-  return data;
+  return apiFetch(
+    `/price-history/${encodeURIComponent(productId)}?${params.toString()}`,
+    mockGetPriceHistory(productId, locationId, days)
+  );
 }
 
 // ============================================
@@ -217,40 +131,13 @@ export async function searchProducts(query: string): Promise<SearchResult[]> {
   const sanitized = sanitizeSearchQuery(query);
   if (!sanitized) return [];
 
-  if (!isSupabaseConfigured) {
-    const lowerQuery = sanitized.toLowerCase();
-    return mockProducts
-      .filter(p => p.name.toLowerCase().includes(lowerQuery))
-      .map(p => ({
-        id: p.id,
-        name: p.name,
-        slug: p.slug,
-        category_id: p.category_id,
-        subcategory: p.subcategory,
-        unit: p.unit,
-        similarity_score: p.name.toLowerCase().startsWith(lowerQuery) ? 1 : 0.5,
-      }))
-      .sort((a, b) => b.similarity_score - a.similarity_score);
-  }
-
-  const { data, error } = await supabase!.rpc('search_products', {
-    search_query: sanitized,
-    result_limit: 20,
-  });
-
-  if (error) {
-    console.error('Error searching products:', error);
-    return [];
-  }
-  return data;
+  return apiFetch(`/search?q=${encodeURIComponent(sanitized)}`, []);
 }
 
 // ============================================
 // Ticker
 // ============================================
 export async function fetchTickerData(): Promise<TickerItem[]> {
-  // For now, always use mock ticker data
-  // In production, this would aggregate from latest_prices
   return mockGetTickerData();
 }
 
@@ -260,35 +147,40 @@ export async function fetchTickerData(): Promise<TickerItem[]> {
 export async function createPriceAlert(
   alert: Omit<PriceAlert, 'id' | 'is_active' | 'last_triggered_at' | 'created_at'>
 ): Promise<{ success: boolean; error?: string }> {
-  if (!isSupabaseConfigured) {
-    // Mock success
-    return { success: true };
-  }
-
-  const { error } = await supabase!
-    .from('price_alerts')
-    .insert({
-      product_id: alert.product_id,
-      location_id: alert.location_id,
-      contact_type: alert.contact_type,
-      contact_value: alert.contact_value,
-      threshold_type: alert.threshold_type,
-      threshold_value: alert.threshold_value,
-      direction: alert.direction,
+  try {
+    const res = await fetch(`${API_BASE}/price-alerts`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        product_id: alert.product_id,
+        location_id: alert.location_id,
+        contact_type: alert.contact_type,
+        contact_value: alert.contact_value,
+        threshold_type: alert.threshold_type,
+        threshold_value: alert.threshold_value,
+        direction: alert.direction,
+      }),
     });
 
-  if (error) {
-    console.error('Error creating alert:', error);
+    if (!res.ok) {
+      const data = await res.json();
+      return { success: false, error: data.error || 'Failed to create alert' };
+    }
+    return { success: true };
+  } catch {
     return { success: false, error: 'Failed to create alert. Please try again.' };
   }
-  return { success: true };
 }
 
 // ============================================
 // View Count
 // ============================================
 export async function incrementViewCount(productId: string): Promise<void> {
-  if (!isSupabaseConfigured) return;
-
-  await supabase!.rpc('increment_view_count', { p_product_id: productId });
+  try {
+    await fetch(`${API_BASE}/products/${encodeURIComponent(productId)}/view`, {
+      method: 'POST',
+    });
+  } catch {
+    // Non-critical, ignore errors
+  }
 }

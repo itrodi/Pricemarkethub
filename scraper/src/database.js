@@ -1,99 +1,94 @@
-import { createClient } from '@supabase/supabase-js';
+import pg from 'pg';
 import { logger } from './logger.js';
 
-let supabase = null;
+const { Pool } = pg;
+
+let pool = null;
 
 export function initDatabase() {
-  const url = process.env.SUPABASE_URL;
-  const key = process.env.SUPABASE_SERVICE_KEY;
+  const connectionString = process.env.DATABASE_URL;
 
-  if (!url || !key) {
-    logger.warn('Supabase not configured. Running in dry-run mode (no data will be saved).');
+  if (!connectionString) {
+    logger.warn('DATABASE_URL not configured. Running in dry-run mode (no data will be saved).');
     return null;
   }
 
-  supabase = createClient(url, key, {
-    auth: { persistSession: false, autoRefreshToken: false },
+  pool = new Pool({
+    connectionString,
+    max: 10,
+    idleTimeoutMillis: 30000,
+    connectionTimeoutMillis: 5000,
+  });
+
+  pool.on('error', (err) => {
+    logger.error('Unexpected PostgreSQL pool error:', { error: err.message });
   });
 
   logger.info('Database connection initialized.');
-  return supabase;
+  return pool;
 }
 
 /**
  * Load category map: slug -> { id, name }
  */
 export async function loadCategoryMap() {
-  if (!supabase) return new Map();
+  if (!pool) return new Map();
 
-  const { data, error } = await supabase
-    .from('categories')
-    .select('id, name, slug');
-
-  if (error) {
-    logger.error('Failed to load categories', { error: error.message });
+  try {
+    const { rows } = await pool.query('SELECT id, name, slug FROM categories');
+    const map = new Map();
+    for (const cat of rows) {
+      map.set(cat.slug, cat);
+    }
+    logger.info(`Loaded ${rows.length} categories.`);
+    return map;
+  } catch (err) {
+    logger.error('Failed to load categories', { error: err.message });
     return new Map();
   }
-
-  const map = new Map();
-  for (const cat of data) {
-    map.set(cat.slug, cat);
-  }
-
-  logger.info(`Loaded ${data.length} categories.`);
-  return map;
 }
 
 /**
  * Load subcategory map: slug -> { id, name, category_id }
  */
 export async function loadSubcategoryMap() {
-  if (!supabase) return new Map();
+  if (!pool) return new Map();
 
-  const { data, error } = await supabase
-    .from('subcategories')
-    .select('id, name, slug, category_id');
-
-  if (error) {
-    logger.error('Failed to load subcategories', { error: error.message });
+  try {
+    const { rows } = await pool.query('SELECT id, name, slug, category_id FROM subcategories');
+    const map = new Map();
+    for (const sub of rows) {
+      map.set(sub.slug, sub);
+    }
+    logger.info(`Loaded ${rows.length} subcategories.`);
+    return map;
+  } catch (err) {
+    logger.error('Failed to load subcategories', { error: err.message });
     return new Map();
   }
-
-  const map = new Map();
-  for (const sub of data) {
-    map.set(sub.slug, sub);
-  }
-
-  logger.info(`Loaded ${data.length} subcategories.`);
-  return map;
 }
 
 /**
  * Load all locations for matching.
  */
 export async function loadLocationMap() {
-  if (!supabase) return new Map();
+  if (!pool) return new Map();
 
-  const { data, error } = await supabase
-    .from('locations')
-    .select('id, name, state, location_type');
-
-  if (error) {
-    logger.error('Failed to load locations', { error: error.message });
+  try {
+    const { rows } = await pool.query('SELECT id, name, state, location_type FROM locations');
+    const map = new Map();
+    for (const loc of rows) {
+      map.set(loc.name.toLowerCase(), loc);
+      if (loc.state) {
+        map.set(loc.state.toLowerCase(), loc);
+      }
+    }
+    logger.info(`Loaded ${rows.length} locations.`);
+    return map;
+  } catch (err) {
+    logger.error('Failed to load locations', { error: err.message });
     return new Map();
   }
-
-  const map = new Map();
-  for (const loc of data) {
-    map.set(loc.name.toLowerCase(), loc);
-    // Also map by state name for Jiji location matching
-    if (loc.state) {
-      map.set(loc.state.toLowerCase(), loc);
-    }
-  }
-
-  logger.info(`Loaded ${data.length} locations.`);
-  return map;
 }
 
 /**
@@ -114,7 +109,7 @@ function slugify(text) {
  * Returns the product record with id.
  */
 export async function findOrCreateProduct(scraped, categoryId, subcategoryId, source, subcategoryName = null) {
-  if (!supabase) return null;
+  if (!pool) return null;
 
   const slug = slugify(scraped.name);
   if (!slug) return null;
@@ -133,51 +128,54 @@ export async function findOrCreateProduct(scraped, categoryId, subcategoryId, so
     }
   }
 
-  // Try to find existing product by slug
-  const { data: existing } = await supabase
-    .from('products')
-    .select('id, name, slug')
-    .eq('slug', slug)
-    .maybeSingle();
+  try {
+    // Try to find existing product by slug
+    const { rows: existing } = await pool.query(
+      'SELECT id, name, slug FROM products WHERE slug = $1',
+      [slug]
+    );
 
-  if (existing) {
-    return existing;
-  }
-
-  // Create new product — set both subcategory_id (FK) and subcategory (TEXT) for compatibility
-  const { data: created, error } = await supabase
-    .from('products')
-    .insert({
-      name: scraped.name,
-      slug,
-      category_id: categoryId,
-      subcategory_id: subcategoryId || null,
-      subcategory: subcategoryName || null,
-      condition: scraped.condition || null,
-      description: description || null,
-      image_url: scraped.imageUrl || null,
-      source_url: scraped.link || null,
-      source,
-      unit: 'per unit',
-    })
-    .select('id, name, slug')
-    .single();
-
-  if (error) {
-    // Could be a race condition / duplicate slug - try to fetch again
-    if (error.code === '23505') {
-      const { data: retry } = await supabase
-        .from('products')
-        .select('id, name, slug')
-        .eq('slug', slug)
-        .maybeSingle();
-      return retry;
+    if (existing.length > 0) {
+      return existing[0];
     }
-    logger.warn(`Failed to create product "${scraped.name}": ${error.message}`);
+
+    // Create new product
+    const { rows: created } = await pool.query(
+      `INSERT INTO products (name, slug, category_id, subcategory_id, subcategory, condition, description, image_url, source_url, source, unit)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+       RETURNING id, name, slug`,
+      [
+        scraped.name,
+        slug,
+        categoryId,
+        subcategoryId || null,
+        subcategoryName || null,
+        scraped.condition || null,
+        description || null,
+        scraped.imageUrl || null,
+        scraped.link || null,
+        source,
+        'per unit',
+      ]
+    );
+
+    return created[0];
+  } catch (err) {
+    // Handle duplicate slug race condition
+    if (err.code === '23505') {
+      try {
+        const { rows: retry } = await pool.query(
+          'SELECT id, name, slug FROM products WHERE slug = $1',
+          [slug]
+        );
+        return retry[0] || null;
+      } catch {
+        return null;
+      }
+    }
+    logger.warn(`Failed to create product "${scraped.name}": ${err.message}`);
     return null;
   }
-
-  return created;
 }
 
 /**
@@ -187,22 +185,18 @@ export async function findOrCreateProduct(scraped, categoryId, subcategoryId, so
 export function resolveLocation(locationText, locationMap) {
   if (!locationText) return locationMap.get('online')?.id || null;
 
-  // Jiji format: "State, Area" e.g., "Lagos, Ikeja" or "Oyo, Ibadan"
   const parts = locationText.split(',').map(p => p.trim());
 
-  // Try the state first (e.g., "Lagos")
   if (parts[0]) {
     const stateMatch = locationMap.get(parts[0].toLowerCase());
     if (stateMatch) return stateMatch.id;
   }
 
-  // Try the area (e.g., "Ibadan")
   if (parts[1]) {
     const areaMatch = locationMap.get(parts[1].toLowerCase());
     if (areaMatch) return areaMatch.id;
   }
 
-  // Fallback to Online
   return locationMap.get('online')?.id || null;
 }
 
@@ -210,7 +204,7 @@ export function resolveLocation(locationText, locationMap) {
  * Insert scraped price points into the database.
  */
 export async function insertPricePoints(points) {
-  if (!supabase || points.length === 0) {
+  if (!pool || points.length === 0) {
     logger.info(`Dry-run: would insert ${points.length} price points.`);
     return { success: points.length, errors: 0 };
   }
@@ -222,15 +216,32 @@ export async function insertPricePoints(points) {
   for (let i = 0; i < points.length; i += batchSize) {
     const batch = points.slice(i, i + batchSize);
 
-    const { error } = await supabase
-      .from('price_points')
-      .insert(batch);
+    try {
+      const placeholders = batch.map((_, idx) => {
+        const base = idx * 7;
+        return `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5}, $${base + 6}, $${base + 7})`;
+      }).join(', ');
 
-    if (error) {
-      logger.error(`Batch insert failed at offset ${i}`, { error: error.message });
-      errors += batch.length;
-    } else {
+      const flatParams = batch.flatMap(p => [
+        p.product_id,
+        p.location_id,
+        p.price,
+        p.currency,
+        p.source,
+        p.location_text,
+        p.recorded_at,
+      ]);
+
+      await pool.query(
+        `INSERT INTO price_points (product_id, location_id, price, currency, source, location_text, recorded_at)
+         VALUES ${placeholders}`,
+        flatParams
+      );
+
       success += batch.length;
+    } catch (err) {
+      logger.error(`Batch insert failed at offset ${i}`, { error: err.message });
+      errors += batch.length;
     }
   }
 
@@ -241,12 +252,22 @@ export async function insertPricePoints(points) {
  * Refresh materialized views after scraping.
  */
 export async function refreshViews() {
-  if (!supabase) return;
+  if (!pool) return;
 
-  const { error } = await supabase.rpc('refresh_materialized_views');
-  if (error) {
-    logger.warn('Failed to refresh materialized views', { error: error.message });
-  } else {
+  try {
+    await pool.query('SELECT refresh_materialized_views()');
     logger.info('Materialized views refreshed.');
+  } catch (err) {
+    logger.warn('Failed to refresh materialized views', { error: err.message });
+  }
+}
+
+/**
+ * Close the database connection pool.
+ */
+export async function closeDatabase() {
+  if (pool) {
+    await pool.end();
+    pool = null;
   }
 }

@@ -1,6 +1,6 @@
 {
   "name": "pricewise-scraper",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "description": "Price data scraper for PriceWise Nigeria - Jumia, Konga, Jiji",
   "type": "module",
   "scripts": {
@@ -12,10 +12,10 @@
     "server": "node src/server.js"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.98.0",
     "cheerio": "^1.0.0",
     "cors": "^2.8.6",
     "dotenv": "^16.5.0",
-    "express": "^5.2.1"
+    "express": "^5.2.1",
+    "pg": "^8.16.0"
   }
 }

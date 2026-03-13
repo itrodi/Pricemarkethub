@@ -1,21 +1,37 @@
-import { supabase, isSupabaseConfigured } from './supabase';
+import { API_BASE } from './supabase';
 import { sanitizeInput } from './sanitize';
 import type { Category, Subcategory, Product, Location, PricePoint } from '../types/database';
-import {
-  categories as mockCategories,
-  locations as mockLocations,
-  products as mockProducts,
-  pricePoints as mockPricePoints,
-} from '../data/mockData';
 
-// In-memory stores for demo mode
-let demoCategories = [...mockCategories];
-let demoProducts = [...mockProducts];
-let demoLocations = [...mockLocations];
-let demoPricePoints = [...mockPricePoints];
+const ADMIN_API = `${API_BASE}/admin`;
 
-function generateId(): string { return crypto.randomUUID(); }
-function slugify(text: string): string { return text.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, ''); }
+/**
+ * Get the stored admin token.
+ */
+function getToken(): string | null {
+  return localStorage.getItem('pw_admin_token');
+}
+
+/**
+ * Helper for authenticated admin API calls.
+ */
+async function adminFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
+  const token = getToken();
+  const res = await fetch(`${ADMIN_API}${path}`, {
+    ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+      ...options.headers,
+    },
+  });
+
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+    throw new Error(data.error || `Request failed: ${res.status}`);
+  }
+
+  return res.json();
+}
 
 // ============================================
 // Admin Stats
@@ -31,44 +47,14 @@ export interface AdminStats {
 }
 
 export async function fetchAdminStats(): Promise<AdminStats> {
-  if (!isSupabaseConfigured) {
-    const oneDayAgo = new Date(Date.now() - 86400000);
-    return {
-      totalCategories: demoCategories.length,
-      totalSubcategories: 0,
-      totalProducts: demoProducts.length,
-      totalLocations: demoLocations.length,
-      totalPricePoints: demoPricePoints.length,
-      totalAlerts: 0,
-      recentPricePoints: demoPricePoints.filter(pp => new Date(pp.recorded_at) >= oneDayAgo).length,
-    };
-  }
-
-  const [cats, subcats, prods, locs, pps, alerts] = await Promise.all([
-    supabase!.from('categories').select('id', { count: 'exact', head: true }),
-    supabase!.from('subcategories').select('id', { count: 'exact', head: true }),
-    supabase!.from('products').select('id', { count: 'exact', head: true }),
-    supabase!.from('locations').select('id', { count: 'exact', head: true }),
-    supabase!.from('price_points').select('id', { count: 'exact', head: true }),
-    supabase!.from('price_alerts').select('id', { count: 'exact', head: true }),
-  ]);
-  const recentRes = await supabase!.from('price_points').select('id', { count: 'exact', head: true })
-    .gte('recorded_at', new Date(Date.now() - 86400000).toISOString());
-
-  return {
-    totalCategories: cats.count || 0, totalSubcategories: subcats.count || 0, totalProducts: prods.count || 0, totalLocations: locs.count || 0,
-    totalPricePoints: pps.count || 0, totalAlerts: alerts.count || 0, recentPricePoints: recentRes.count || 0,
-  };
+  return adminFetch('/stats');
 }
 
 // ============================================
 // Categories CRUD
 // ============================================
 export async function adminFetchCategories(): Promise<Category[]> {
-  if (!isSupabaseConfigured) return demoCategories;
-  const { data, error } = await supabase!.from('categories').select('*').order('display_order');
-  if (error) throw new Error(error.message);
-  return data;
+  return adminFetch('/categories');
 }
 
 export async function adminCreateCategory(
@@ -76,69 +62,41 @@ export async function adminCreateCategory(
 ): Promise<Category> {
   const name = sanitizeInput(input.name).trim();
   if (!name) throw new Error('Category name is required');
-  const slug = slugify(name);
 
-  if (!isSupabaseConfigured) {
-    const newCat: Category = {
-      id: generateId(), name, slug, icon: sanitizeInput(input.icon) || 'package',
-      description: sanitizeInput(input.description || ''), color: input.color || '#10b981',
-      display_order: input.display_order || demoCategories.length + 1,
-      created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
-    };
-    demoCategories.push(newCat);
-    return newCat;
-  }
-
-  const { data, error } = await supabase!.from('categories').insert({
-    name, slug, icon: input.icon || 'package', description: input.description || null,
-    color: input.color || '#10b981', display_order: input.display_order || 0,
-  }).select().single();
-  if (error) throw new Error(error.message);
-  return data;
+  return adminFetch('/categories', {
+    method: 'POST',
+    body: JSON.stringify({
+      name,
+      icon: sanitizeInput(input.icon) || 'package',
+      description: sanitizeInput(input.description || ''),
+      color: input.color || '#10b981',
+      display_order: input.display_order || 0,
+    }),
+  });
 }
 
 export async function adminUpdateCategory(
-  id: string, input: Partial<{ name: string; icon: string; description: string; color: string; display_order: number }>
+  id: string,
+  input: Partial<{ name: string; icon: string; description: string; color: string; display_order: number }>
 ): Promise<Category> {
-  if (!isSupabaseConfigured) {
-    const idx = demoCategories.findIndex(c => c.id === id);
-    if (idx === -1) throw new Error('Category not found');
-    const updated = { ...demoCategories[idx], ...input,
-      name: input.name ? sanitizeInput(input.name).trim() : demoCategories[idx].name,
-      slug: input.name ? slugify(sanitizeInput(input.name).trim()) : demoCategories[idx].slug,
-      updated_at: new Date().toISOString(),
-    };
-    demoCategories[idx] = updated;
-    return updated;
-  }
+  const updates: Record<string, unknown> = { ...input };
+  if (input.name) updates.name = sanitizeInput(input.name).trim();
 
-  const updates: Record<string, unknown> = { ...input, updated_at: new Date().toISOString() };
-  if (input.name) { updates.name = sanitizeInput(input.name).trim(); updates.slug = slugify(updates.name as string); }
-  const { data, error } = await supabase!.from('categories').update(updates).eq('id', id).select().single();
-  if (error) throw new Error(error.message);
-  return data;
+  return adminFetch(`/categories/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(updates),
+  });
 }
 
 export async function adminDeleteCategory(id: string): Promise<void> {
-  if (!isSupabaseConfigured) { demoCategories = demoCategories.filter(c => c.id !== id); return; }
-  const { error } = await supabase!.from('categories').delete().eq('id', id);
-  if (error) throw new Error(error.message);
+  await adminFetch(`/categories/${id}`, { method: 'DELETE' });
 }
 
 // ============================================
 // Subcategories CRUD
 // ============================================
 export async function adminFetchSubcategories(): Promise<(Subcategory & { category_name?: string })[]> {
-  if (!isSupabaseConfigured) return [];
-  const { data, error } = await supabase!
-    .from('subcategories')
-    .select('*, categories(name)')
-    .order('display_order');
-  if (error) throw new Error(error.message);
-  return (data || []).map((s: Record<string, unknown>) => ({
-    ...s,
-    category_name: (s.categories as { name: string } | null)?.name || '',
-  })) as (Subcategory & { category_name?: string })[];
+  return adminFetch('/subcategories');
 }
 
 export async function adminCreateSubcategory(
@@ -147,45 +105,40 @@ export async function adminCreateSubcategory(
   const name = sanitizeInput(input.name).trim();
   if (!name) throw new Error('Subcategory name is required');
   if (!input.category_id) throw new Error('Parent category is required');
-  const slug = slugify(name);
 
-  if (!isSupabaseConfigured) throw new Error('Supabase not configured');
-
-  const { data, error } = await supabase!.from('subcategories').insert({
-    name, slug, category_id: input.category_id,
-    description: input.description || null,
-    display_order: input.display_order || 0,
-  }).select().single();
-  if (error) throw new Error(error.message);
-  return data;
+  return adminFetch('/subcategories', {
+    method: 'POST',
+    body: JSON.stringify({
+      name,
+      category_id: input.category_id,
+      description: input.description || '',
+      display_order: input.display_order || 0,
+    }),
+  });
 }
 
 export async function adminUpdateSubcategory(
-  id: string, input: Partial<{ name: string; category_id: string; description: string; display_order: number }>
+  id: string,
+  input: Partial<{ name: string; category_id: string; description: string; display_order: number }>
 ): Promise<Subcategory> {
-  if (!isSupabaseConfigured) throw new Error('Supabase not configured');
+  const updates: Record<string, unknown> = { ...input };
+  if (input.name) updates.name = sanitizeInput(input.name).trim();
 
-  const updates: Record<string, unknown> = { ...input, updated_at: new Date().toISOString() };
-  if (input.name) { updates.name = sanitizeInput(input.name).trim(); updates.slug = slugify(updates.name as string); }
-  const { data, error } = await supabase!.from('subcategories').update(updates).eq('id', id).select().single();
-  if (error) throw new Error(error.message);
-  return data;
+  return adminFetch(`/subcategories/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(updates),
+  });
 }
 
 export async function adminDeleteSubcategory(id: string): Promise<void> {
-  if (!isSupabaseConfigured) return;
-  const { error } = await supabase!.from('subcategories').delete().eq('id', id);
-  if (error) throw new Error(error.message);
+  await adminFetch(`/subcategories/${id}`, { method: 'DELETE' });
 }
 
 // ============================================
 // Products CRUD
 // ============================================
 export async function adminFetchProducts(): Promise<Product[]> {
-  if (!isSupabaseConfigured) return demoProducts;
-  const { data, error } = await supabase!.from('products').select('*').order('name');
-  if (error) throw new Error(error.message);
-  return data;
+  return adminFetch('/products');
 }
 
 export async function adminCreateProduct(
@@ -194,63 +147,42 @@ export async function adminCreateProduct(
   const name = sanitizeInput(input.name).trim();
   if (!name) throw new Error('Product name is required');
   if (!input.category_id) throw new Error('Category is required');
-  const slug = slugify(name);
 
-  if (!isSupabaseConfigured) {
-    const p: Product = {
-      id: generateId(), name, slug, category_id: input.category_id,
-      subcategory: sanitizeInput(input.subcategory || '') || null, unit: sanitizeInput(input.unit) || 'per unit',
-      description: sanitizeInput(input.description || '') || null, image_url: null, is_featured: input.is_featured || false,
-      view_count: 0, created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
-    };
-    demoProducts.push(p);
-    return p;
-  }
-
-  const { data, error } = await supabase!.from('products').insert({
-    name, slug, category_id: input.category_id, subcategory: input.subcategory || null,
-    unit: input.unit || 'per unit', description: input.description || null, is_featured: input.is_featured || false,
-  }).select().single();
-  if (error) throw new Error(error.message);
-  return data;
+  return adminFetch('/products', {
+    method: 'POST',
+    body: JSON.stringify({
+      name,
+      category_id: input.category_id,
+      subcategory: sanitizeInput(input.subcategory || '') || null,
+      unit: sanitizeInput(input.unit) || 'per unit',
+      description: sanitizeInput(input.description || '') || null,
+      is_featured: input.is_featured || false,
+    }),
+  });
 }
 
 export async function adminUpdateProduct(
-  id: string, input: Partial<{ name: string; category_id: string; subcategory: string; unit: string; description: string; is_featured: boolean }>
+  id: string,
+  input: Partial<{ name: string; category_id: string; subcategory: string; unit: string; description: string; is_featured: boolean }>
 ): Promise<Product> {
-  if (!isSupabaseConfigured) {
-    const idx = demoProducts.findIndex(p => p.id === id);
-    if (idx === -1) throw new Error('Product not found');
-    const updated = { ...demoProducts[idx], ...input,
-      name: input.name ? sanitizeInput(input.name).trim() : demoProducts[idx].name,
-      slug: input.name ? slugify(sanitizeInput(input.name).trim()) : demoProducts[idx].slug,
-      updated_at: new Date().toISOString(),
-    };
-    demoProducts[idx] = updated;
-    return updated;
-  }
+  const updates: Record<string, unknown> = { ...input };
+  if (input.name) updates.name = sanitizeInput(input.name).trim();
 
-  const updates: Record<string, unknown> = { ...input, updated_at: new Date().toISOString() };
-  if (input.name) { updates.name = sanitizeInput(input.name).trim(); updates.slug = slugify(updates.name as string); }
-  const { data, error } = await supabase!.from('products').update(updates).eq('id', id).select().single();
-  if (error) throw new Error(error.message);
-  return data;
+  return adminFetch(`/products/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(updates),
+  });
 }
 
 export async function adminDeleteProduct(id: string): Promise<void> {
-  if (!isSupabaseConfigured) { demoProducts = demoProducts.filter(p => p.id !== id); return; }
-  const { error } = await supabase!.from('products').delete().eq('id', id);
-  if (error) throw new Error(error.message);
+  await adminFetch(`/products/${id}`, { method: 'DELETE' });
 }
 
 // ============================================
 // Locations CRUD
 // ============================================
 export async function adminFetchLocations(): Promise<Location[]> {
-  if (!isSupabaseConfigured) return demoLocations;
-  const { data, error } = await supabase!.from('locations').select('*').order('name');
-  if (error) throw new Error(error.message);
-  return data;
+  return adminFetch('/locations');
 }
 
 export async function adminCreateLocation(
@@ -259,27 +191,20 @@ export async function adminCreateLocation(
   const name = sanitizeInput(input.name).trim();
   if (!name) throw new Error('Location name is required');
 
-  if (!isSupabaseConfigured) {
-    const loc: Location = {
-      id: generateId(), name, state: sanitizeInput(input.state).trim(), region: sanitizeInput(input.region).trim(),
-      location_type: input.location_type || 'city', latitude: null, longitude: null, is_major: input.is_major || false,
-      created_at: new Date().toISOString(),
-    };
-    demoLocations.push(loc);
-    return loc;
-  }
-
-  const { data, error } = await supabase!.from('locations').insert({
-    name, state: input.state, region: input.region, location_type: input.location_type || 'city', is_major: input.is_major || false,
-  }).select().single();
-  if (error) throw new Error(error.message);
-  return data;
+  return adminFetch('/locations', {
+    method: 'POST',
+    body: JSON.stringify({
+      name,
+      state: sanitizeInput(input.state).trim(),
+      region: sanitizeInput(input.region).trim(),
+      location_type: input.location_type || 'city',
+      is_major: input.is_major || false,
+    }),
+  });
 }
 
 export async function adminDeleteLocation(id: string): Promise<void> {
-  if (!isSupabaseConfigured) { demoLocations = demoLocations.filter(l => l.id !== id); return; }
-  const { error } = await supabase!.from('locations').delete().eq('id', id);
-  if (error) throw new Error(error.message);
+  await adminFetch(`/locations/${id}`, { method: 'DELETE' });
 }
 
 // ============================================
@@ -288,26 +213,13 @@ export async function adminDeleteLocation(id: string): Promise<void> {
 export async function adminFetchPricePoints(filters?: {
   product_id?: string; location_id?: string; limit?: number;
 }): Promise<(PricePoint & { product_name?: string; location_name?: string })[]> {
-  const limit = filters?.limit || 100;
+  const params = new URLSearchParams();
+  if (filters?.product_id) params.set('product_id', filters.product_id);
+  if (filters?.location_id) params.set('location_id', filters.location_id);
+  if (filters?.limit) params.set('limit', String(filters.limit));
+  const qs = params.toString() ? `?${params.toString()}` : '';
 
-  if (!isSupabaseConfigured) {
-    let points = [...demoPricePoints] as PricePoint[];
-    if (filters?.product_id) points = points.filter(pp => pp.product_id === filters.product_id);
-    if (filters?.location_id) points = points.filter(pp => pp.location_id === filters.location_id);
-    points.sort((a, b) => new Date(b.recorded_at).getTime() - new Date(a.recorded_at).getTime());
-    return points.slice(0, limit).map(pp => ({
-      ...pp,
-      product_name: demoProducts.find(p => p.id === pp.product_id)?.name,
-      location_name: demoLocations.find(l => l.id === pp.location_id)?.name,
-    }));
-  }
-
-  let query = supabase!.from('price_points').select('*').order('recorded_at', { ascending: false }).limit(limit);
-  if (filters?.product_id) query = query.eq('product_id', filters.product_id);
-  if (filters?.location_id) query = query.eq('location_id', filters.location_id);
-  const { data, error } = await query;
-  if (error) throw new Error(error.message);
-  return data || [];
+  return adminFetch(`/price-points${qs}`);
 }
 
 export async function adminCreatePricePoint(
@@ -317,22 +229,16 @@ export async function adminCreatePricePoint(
   if (!input.location_id) throw new Error('Location is required');
   if (!input.price || input.price <= 0) throw new Error('Price must be positive');
 
-  if (!isSupabaseConfigured) {
-    const pp: PricePoint = {
-      id: generateId(), product_id: input.product_id, location_id: input.location_id,
-      price: input.price, currency: 'NGN', source: input.source || 'market_survey', verified: false,
-      recorded_at: input.recorded_at || new Date().toISOString(), created_at: new Date().toISOString(),
-    };
-    demoPricePoints.push(pp);
-    return pp;
-  }
-
-  const { data, error } = await supabase!.from('price_points').insert({
-    product_id: input.product_id, location_id: input.location_id, price: input.price,
-    currency: 'NGN', source: input.source || 'market_survey', recorded_at: input.recorded_at || new Date().toISOString(),
-  }).select().single();
-  if (error) throw new Error(error.message);
-  return data;
+  return adminFetch('/price-points', {
+    method: 'POST',
+    body: JSON.stringify({
+      product_id: input.product_id,
+      location_id: input.location_id,
+      price: input.price,
+      source: input.source || 'market_survey',
+      recorded_at: input.recorded_at || new Date().toISOString(),
+    }),
+  });
 }
 
 // ============================================
@@ -353,48 +259,8 @@ export interface ImportResult {
 }
 
 export async function adminBulkImportPrices(rows: CsvPriceRow[]): Promise<ImportResult> {
-  const result: ImportResult = { total: rows.length, success: 0, errors: [] };
-
-  const products = isSupabaseConfigured ? await adminFetchProducts() : demoProducts;
-  const locations = isSupabaseConfigured ? await adminFetchLocations() : demoLocations;
-
-  const productMap = new Map(products.map(p => [p.name.toLowerCase(), p.id]));
-  const locationMap = new Map(locations.map(l => [l.name.toLowerCase(), l.id]));
-  const validSources: PricePoint['source'][] = ['jumia', 'konga', 'jiji', 'nbs', 'cbn', 'nnpc', 'market_survey', 'user_report'];
-
-  const validPoints: { product_id: string; location_id: string; price: number; source: PricePoint['source']; recorded_at: string }[] = [];
-
-  for (let i = 0; i < rows.length; i++) {
-    const row = rows[i];
-    const productId = productMap.get(row.product_name.toLowerCase().trim());
-    if (!productId) { result.errors.push({ row: i + 1, message: `Product not found: "${row.product_name}"` }); continue; }
-
-    const locationId = locationMap.get(row.location_name.toLowerCase().trim());
-    if (!locationId) { result.errors.push({ row: i + 1, message: `Location not found: "${row.location_name}"` }); continue; }
-
-    if (!row.price || row.price <= 0 || isNaN(row.price)) { result.errors.push({ row: i + 1, message: `Invalid price: "${row.price}"` }); continue; }
-
-    const source = (validSources.includes(row.source as PricePoint['source']) ? row.source : 'market_survey') as PricePoint['source'];
-    validPoints.push({ product_id: productId, location_id: locationId, price: row.price, source, recorded_at: row.recorded_at || new Date().toISOString() });
-  }
-
-  if (validPoints.length === 0) return result;
-
-  if (!isSupabaseConfigured) {
-    for (const point of validPoints) {
-      demoPricePoints.push({ id: generateId(), ...point, currency: 'NGN', verified: false, created_at: new Date().toISOString() });
-      result.success++;
-    }
-    return result;
-  }
-
-  const batchSize = 500;
-  for (let i = 0; i < validPoints.length; i += batchSize) {
-    const batch = validPoints.slice(i, i + batchSize).map(p => ({ ...p, currency: 'NGN' }));
-    const { error } = await supabase!.from('price_points').insert(batch);
-    if (error) result.errors.push({ row: i + 1, message: `Batch insert error: ${error.message}` });
-    else result.success += batch.length;
-  }
-
-  return result;
+  return adminFetch('/bulk-import', {
+    method: 'POST',
+    body: JSON.stringify({ rows }),
+  });
 }
